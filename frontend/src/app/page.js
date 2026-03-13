@@ -30,7 +30,7 @@ export default function Home() {
       setPanelKey((k) => k + 1);
       invalidateMap();
     },
-    [invalidateMap]
+    [invalidateMap],
   );
 
   const handleResourceSelect = useCallback(
@@ -40,7 +40,7 @@ export default function Home() {
       setPanelKey((k) => k + 1);
       invalidateMap();
     },
-    [invalidateMap]
+    [invalidateMap],
   );
 
   const handleOpenPanel = useCallback(() => {
@@ -62,7 +62,6 @@ export default function Home() {
 
   return (
     <div className="flex flex-col w-screen h-screen overflow-hidden bg-[#eae6da]">
-
       {/* ---- Navbar at the top ---- */}
       <Navbar
         activeMode={mode}
@@ -71,11 +70,10 @@ export default function Home() {
       />
 
       {/* ---- Map + Panel row (fills remaining height) ---- */}
-      <div className="flex flex-1 overflow-hidden">
-
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* ---- Map (transitions from 100% to 55%) ---- */}
         <div
-          className="relative h-full transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
+          className="relative h-full min-h-0 transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
           style={{ width: showPanel ? "55%" : "100%" }}
         >
           <MapView
@@ -90,11 +88,7 @@ export default function Home() {
           {/* CTA button — visible when panel is closed */}
           {!showPanel && (
             <button
-              onClick={
-                mode === "operator"
-                  ? undefined
-                  : handleOpenPanel
-              }
+              onClick={mode === "operator" ? undefined : handleOpenPanel}
               className={`absolute bottom-8 left-1/2 -translate-x-1/2 z-[1000]
                 px-6 py-3 bg-white/95 backdrop-blur-sm rounded-2xl border border-sand-200
                 text-sm font-medium shadow-sm
@@ -105,8 +99,8 @@ export default function Home() {
               {mode === "operator"
                 ? "Click a pin to view insights"
                 : mode === "donor"
-                ? "View impact report →"
-                : "View gap analysis →"}
+                  ? "View impact report →"
+                  : "View gap analysis →"}
             </button>
           )}
 
@@ -118,7 +112,7 @@ export default function Home() {
 
         {/* ---- Data panel (transitions from 0% to 45%) ---- */}
         <div
-          className="relative h-full bg-white border-l border-sand-200 overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
+          className="relative h-full min-h-0 bg-white border-l border-sand-200 overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
           style={{
             width: showPanel ? "45%" : "0%",
             opacity: showPanel ? 1 : 0,
@@ -144,7 +138,6 @@ export default function Home() {
             </div>
           )}
         </div>
-
       </div>
     </div>
   );
