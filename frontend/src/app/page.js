@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
-import ModeToggle from "@/components/ModeToggle";
+import Navbar from "@/components/Navbar";
 import OperatorPanel from "@/components/OperatorPanel";
 import DonorPanel from "@/components/DonorPanel";
 import GovernmentPanel from "@/components/GovernmentPanel";
@@ -16,7 +16,6 @@ export default function Home() {
   const [panelKey, setPanelKey] = useState(0);
   const mapInvalidateRef = useRef(null);
 
-  // Tell leaflet to recalculate its size after CSS transition ends
   const invalidateMap = useCallback(() => {
     setTimeout(() => {
       if (mapInvalidateRef.current) mapInvalidateRef.current();
@@ -62,8 +61,18 @@ export default function Home() {
       mode === "government");
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#eae6da]">
-      <div className="flex h-full w-full">
+    <div className="flex flex-col w-screen h-screen overflow-hidden bg-[#eae6da]">
+
+      {/* ---- Navbar at the top ---- */}
+      <Navbar
+        activeMode={mode}
+        onModeChange={handleModeChange}
+        userName="sarah M."
+      />
+
+      {/* ---- Map + Panel row (fills remaining height) ---- */}
+      <div className="flex flex-1 overflow-hidden">
+
         {/* ---- Map (transitions from 100% to 55%) ---- */}
         <div
           className="relative h-full transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]"
@@ -78,14 +87,12 @@ export default function Home() {
             }}
           />
 
-          <ModeToggle activeMode={mode} onModeChange={handleModeChange} />
-
           {/* CTA button — visible when panel is closed */}
           {!showPanel && (
             <button
               onClick={
                 mode === "operator"
-                  ? undefined // operator opens via pin click
+                  ? undefined
                   : handleOpenPanel
               }
               className={`absolute bottom-8 left-1/2 -translate-x-1/2 z-[1000]
@@ -137,6 +144,7 @@ export default function Home() {
             </div>
           )}
         </div>
+
       </div>
     </div>
   );
