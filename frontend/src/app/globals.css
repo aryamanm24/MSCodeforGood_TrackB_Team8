@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap");
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "DM Sans", system-ui, sans-serif;
+  background: #faf8f4;
+  color: #1a1a2e;
+}
+
+/* Leaflet overrides */
+.leaflet-container {
+  background: #eae6da !important;
+  font-family: "DM Sans", system-ui, sans-serif !important;
+}
+
+.leaflet-control-zoom {
+  border: none !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08) !important;
+  border-radius: 10px !important;
+  overflow: hidden !important;
+}
+
+.leaflet-control-zoom a {
+  background: rgba(255, 255, 255, 0.95) !important;
+  color: #1a1a2e !important;
+  border: none !important;
+  width: 34px !important;
+  height: 34px !important;
+  line-height: 34px !important;
+  font-size: 14px !important;
+  backdrop-filter: blur(8px);
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 12px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1) !important;
+  border: 1px solid #e8e4d8 !important;
+}
+
+.leaflet-popup-tip {
+  box-shadow: none !important;
+  border: 1px solid #e8e4d8 !important;
+}
+
+/* Pulse animation for donor pins */
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 4px rgba(29, 158, 117, 0.3),
+      0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(29, 158, 117, 0.08),
+      0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+  100% {
+    box-shadow: 0 0 0 4px rgba(29, 158, 117, 0.3),
+      0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+}
+
+/* Content fade-in when panel opens */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+}
+
+/* Custom scrollbar for panel */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 4px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: #d4cfc0;
+  border-radius: 4px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: #b8b2a3;
+}
