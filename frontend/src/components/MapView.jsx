@@ -39,6 +39,7 @@ export default function MapView({
   const markersRef = useRef([]);
   const overlaysRef = useRef([]);
   const censusOverlaysRef = useRef([]);
+  const selectedZipOverlayRef = useRef(null);
 
   // Active government tab — tracked via custom events from GovernmentPanel
   const [activeGovTab, setActiveGovTab] = useState("overview");
@@ -383,9 +384,68 @@ export default function MapView({
 
     const handleFlyTo = (e) => {
       const { lat, lng, zoom } = e.detail ?? {};
-      if (mapRef.current && lat != null && lng != null) {
-        mapRef.current.flyTo([lat, lng], zoom ?? 14, { duration: 0.8, easeLinearity: 0.3 });
+      const map = mapRef.current;
+      if (!map || lat == null || lng == null) return;
+
+      map.flyTo([lat, lng], zoom ?? 14, { duration: 0.8, easeLinearity: 0.3 });
+
+      // Clear any previous selected ZIP highlight
+      if (selectedZipOverlayRef.current) {
+        selectedZipOverlayRef.current.remove();
+        selectedZipOverlayRef.current = null;
       }
+
+      // Find nearest underserved or zero-pantry ZIP to the clicked point
+      const candidateZips = [
+        ...(govData.underservedZips ?? []),
+        ...(govData.zeroPantryZips ?? []),
+      ];
+
+      const nearest = candidateZips.reduce(
+        (best, z) => {
+          const d = (z.lat - lat) * (z.lat - lat) + (z.lng - lng) * (z.lng - lng);
+          return !best || d < best.d ? { z, d } : best;
+        },
+        null,
+      );
+
+      if (!nearest) return;
+
+      const z = nearest.z;
+
+      // Create a prominent marker at the center of the selected ZIP
+      const size = 24;
+      const color = z.needScore >= 70 ? "#EF4444" : "#F59E0B";
+      const icon = L.divIcon({
+        className: "",
+        html: `<div style="
+          width:${size}px;height:${size}px;
+          background:${color};
+          border:3px solid #fff;
+          border-radius:50%;
+          box-shadow:0 0 0 6px ${color}35, 0 3px 12px rgba(0,0,0,.35);
+        "></div>`,
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+      });
+
+      const marker = L.marker([z.lat, z.lng], { icon }).addTo(map);
+
+      marker.bindPopup(
+        `<div style="font-family:DM Sans,sans-serif;font-size:12px;line-height:1.7">
+          <strong style="font-size:13px;">${z.neighborhood}</strong><br/>
+          <span style="color:#DC2626;font-weight:600;">ZIP ${z.zip}</span><br/>
+          Poverty: <strong>${z.poverty.toFixed(1)}%</strong><br/>
+          Food insecure: <strong>~${z.foodInsecurity.toLocaleString()}</strong><br/>
+          Pantries: <strong>${z.pantryCount}</strong><br/>
+          SNAP / pantry: <strong>${z.snapPerPantry.toLocaleString()}</strong><br/>
+          Need score: <strong style="color:#DC2626">${z.needScore}</strong>
+        </div>`,
+        { closeButton: false },
+      );
+      marker.openPopup();
+
+      selectedZipOverlayRef.current = marker;
     };
 
     window.addEventListener("gov:tabchange", handleTabChange);
