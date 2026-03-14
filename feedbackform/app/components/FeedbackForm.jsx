@@ -261,24 +261,49 @@ export default function FeedbackForm({
 
   const handleSubmit = async () => {
     setSubmitting(true);
+
+    // Build a payload that exactly matches the ResourceReview JSON schema.
+    // Fields that are conditional on attended/photo are nulled out when not applicable.
+    // authorId is a placeholder — replace with real user ID once auth is wired up.
     const payload = {
-      ...form,
-      resourceId,
       createdAt: new Date().toISOString(),
+      deletedAt: null,
+
+      authorId: "anonymous", // TODO: replace with authenticated user ID
+      resourceId,
+      occurrenceId: null,    // TODO: pass as prop when linking to a specific visit
+      userId: null,
+      reviewedByUserId: null,
+
+      attended: form.attended,
+      didNotAttendReason:
+        form.attended === false ? (form.didNotAttendReason || null) : null,
+
+      rating: form.attended === true ? (form.rating > 0 ? form.rating : null) : null,
+      waitTimeMinutes: form.attended === true ? form.waitTimeMinutes : null,
+
+      informationAccurate: form.informationAccurate,
+      text: form.text.trim() || null,
+      shareTextWithResource: form.shareTextWithResource,
+
+      photoUrl: form.photoUrl || null,
+      photoPublic: form.photoUrl ? form.photoPublic : null,
     };
+
     try {
       if (onSubmit) {
         await onSubmit(payload);
       } else {
-        await fetch("/api/reviews", {
+        const res = await fetch("/api/reviews", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
       }
       setSubmitted(true);
     } catch (e) {
-      console.error(e);
+      console.error("Submit failed:", e);
     } finally {
       setSubmitting(false);
     }
@@ -352,40 +377,64 @@ export default function FeedbackForm({
           Your feedback helps {resourceName} and other community members. You've
           earned a raffle entry!
         </p>
-        <div
-          style={{
-            marginTop: "2rem",
-            padding: "16px 24px",
-            background: "white",
-            borderRadius: 14,
-            border: "1px solid #d8d5ce",
-            textAlign: "center",
-          }}
-        >
+        {form.attended === true && form.rating > 0 && (
           <div
             style={{
+              marginTop: "2rem",
+              padding: "16px 24px",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid #d8d5ce",
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 13,
+                color: "#888780",
+                marginBottom: 4,
+                fontFamily: "system-ui, sans-serif",
+              }}
+            >
+              Your rating
+            </div>
+            <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              {[1, 2, 3, 4, 5].map((s) => (
+                <svg
+                  key={s}
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill={form.rating >= s ? "#E4A11B" : "#e0ddd6"}
+                >
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                </svg>
+              ))}
+            </div>
+          </div>
+        )}
+        {form.attended === false && form.didNotAttendReason && (
+          <div
+            style={{
+              marginTop: "2rem",
+              padding: "14px 20px",
+              background: "white",
+              borderRadius: 14,
+              border: "1px solid #d8d5ce",
+              textAlign: "center",
               fontSize: 13,
               color: "#888780",
-              marginBottom: 4,
               fontFamily: "system-ui, sans-serif",
             }}
           >
-            Your rating
+            Reported:{" "}
+            <span style={{ color: "#2c2c2a", fontWeight: 500 }}>
+              {NON_ATTEND_REASONS.find(
+                (r) => r.value === form.didNotAttendReason
+              )?.label || form.didNotAttendReason}
+            </span>
           </div>
-          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-            {[1, 2, 3, 4, 5].map((s) => (
-              <svg
-                key={s}
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill={form.rating >= s ? "#E4A11B" : "#e0ddd6"}
-              >
-                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-              </svg>
-            ))}
-          </div>
-        </div>
+        )}
       </div>
     );
   }

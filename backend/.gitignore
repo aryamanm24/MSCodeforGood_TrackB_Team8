@@ -1,2 +1,7 @@
 node_modules/
+venv/
 .env
+cleaning_log.txt
+cleaning_log.json
+resources_vs_clean_report.json
+resources_vs_clean_report.txt
