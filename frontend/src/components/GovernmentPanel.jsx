@@ -6,6 +6,7 @@ import {
 } from "recharts";
 import { govData } from "@/lib/mockData";
 import Footer from "./Footer";
+import ALICETab from "./ALICETab";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,8 @@ const TABS = [
   { id: "underserved", emoji: "🗺",  label: "Underserved Areas" },
   { id: "barriers",   emoji: "🚧", label: "Access Barriers" },
   { id: "gaps",       emoji: "🧊", label: "Resource Gaps" },
+  { id: "alice", emoji: "👥", label: "True Demand" },
+
 ];
 
 const RESOURCE_TYPES = [
@@ -157,7 +160,7 @@ function UnderservedTab({ filters, flyTo }) {
     <div>
       {/* Summary strip */}
       <div style={{ background: "#F0FDF4", borderLeft: "3px solid #2D6A4F", borderRadius: "0 8px 8px 0", padding: "9px 12px", marginBottom: 14, fontSize: 12, color: "#166534", lineHeight: 1.5 }}>
-        5 Manhattan ZIP codes are critically underserved — high poverty, insufficient pantry coverage
+      32 ZIP codes across all 5 boroughs are critically underserved.
       </div>
 
       {/* ZIP cards */}
@@ -502,6 +505,7 @@ export default function GovernmentPanel() {
         {activeTab === "underserved" && <UnderservedTab filters={filters} flyTo={flyTo} />}
         {activeTab === "barriers"    && <AccessBarriersTab />}
         {activeTab === "gaps"        && <ResourceGapsTab />}
+        {activeTab === "alice" && <ALICETab flyTo={flyTo} />}
         <div style={{ height: 12 }} />
         <Footer />
       </div>
