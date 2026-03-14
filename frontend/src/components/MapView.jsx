@@ -76,8 +76,13 @@ export default function MapView({
     ).addTo(map);
 
     mapRef.current = map;
-    if (onInvalidateRef)
-      onInvalidateRef(() => map.invalidateSize({ animate: true }));
+    if (onInvalidateRef) {
+      onInvalidateRef(() => {
+        if (mapRef.current) {
+          mapRef.current.invalidateSize({ animate: true });
+        }
+      });
+    }
 
     return () => {
       map.remove();
