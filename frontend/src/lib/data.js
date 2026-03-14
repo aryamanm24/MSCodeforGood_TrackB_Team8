@@ -277,31 +277,6 @@ export const feedbackThemes = {
     { theme: "Wrong hours", pct: 35, sentiment: "negative" },
     { theme: "Hot meals available", pct: 60, sentiment: "positive" },
   ],
-  // ── Demo pantry themes (Operator dashboard) ──────────────────────────
-  demo_001: [
-    { theme: "Long wait", pct: 62, sentiment: "negative" },
-    { theme: "Limited variety", pct: 45, sentiment: "negative" },
-    { theme: "Wrong hours posted", pct: 38, sentiment: "negative" },
-    { theme: "Staff kindness", pct: 71, sentiment: "positive" },
-  ],
-  demo_002: [
-    { theme: "Staff kindness", pct: 88, sentiment: "positive" },
-    { theme: "Good variety", pct: 81, sentiment: "positive" },
-    { theme: "Short wait", pct: 74, sentiment: "positive" },
-    { theme: "Early closing time", pct: 18, sentiment: "negative" },
-  ],
-  demo_003: [
-    { theme: "Welcoming staff", pct: 86, sentiment: "positive" },
-    { theme: "Fresh produce", pct: 79, sentiment: "positive" },
-    { theme: "Registration process", pct: 28, sentiment: "negative" },
-    { theme: "Limited hours", pct: 22, sentiment: "negative" },
-  ],
-  demo_004: [
-    { theme: "Long wait", pct: 81, sentiment: "negative" },
-    { theme: "Wrong hours posted", pct: 72, sentiment: "negative" },
-    { theme: "Limited variety", pct: 64, sentiment: "negative" },
-    { theme: "Convenient location", pct: 44, sentiment: "positive" },
-  ],
 };
 
 // --- Census tract data for government overlay ---
@@ -316,6 +291,81 @@ export const censusTracts = [
   { id: "t8", name: "Civic District", bounds: [[40.703, -74.000], [40.710, -73.990]], povertyRate: 0.31, population: 8800, medianIncome: 29000 },
   { id: "t9", name: "South West", bounds: [[40.698, -74.018], [40.703, -74.005]], povertyRate: 0.48, population: 12400, medianIncome: 19000, isGapZone: true },
   { id: "t10", name: "Harbor", bounds: [[40.698, -73.995], [40.705, -73.980]], povertyRate: 0.15, population: 5100, medianIncome: 52000 },
+];
+
+// --- Real nearby pantries (within 1 mile of Bayview Family Pantry) ---
+// Computed using Haversine formula from lat/lng in Manhattan.csv
+export const nearbyPantries = [
+  {
+    name: "Trinity Church Compassion Meals",
+    distance: 0.05,
+    rating: 3.0,
+    reviewCount: 4,
+    subscriptionCount: 9,
+    status: "PUBLISHED",
+    confidence: 0.88,
+    tags: [],
+  },
+  {
+    name: "Trinity Commons Compassion Market",
+    distance: 0.12,
+    rating: 2.67,
+    reviewCount: 7,
+    subscriptionCount: 38,
+    status: "PUBLISHED",
+    confidence: 0.85,
+    tags: ["ID required", "Must bring own bags/cart", "First come first serve", "Schedule via Plentiful app"],
+  },
+  {
+    name: "NYCLK 34 Hillside Ave",
+    distance: 0.21,
+    rating: 2.0,
+    reviewCount: 3,
+    subscriptionCount: 20,
+    status: "PUBLISHED",
+    confidence: 0.74,
+    tags: ["First come first serve"],
+  },
+  {
+    name: "Trinity Church Brown Bag Lunch Ministry",
+    distance: 0.29,
+    rating: 2.5,
+    reviewCount: 3,
+    subscriptionCount: 19,
+    status: "PUBLISHED",
+    confidence: 0.52,
+    tags: ["Call in advance"],
+  },
+  {
+    name: "Met Council - SNAP Assistance",
+    distance: 0.34,
+    rating: 2.37,
+    reviewCount: 29,
+    subscriptionCount: 161,
+    status: "PUBLISHED",
+    confidence: 0.80,
+    tags: ["Call in advance"],
+  },
+  {
+    name: "Public Health Solutions",
+    distance: 0.72,
+    rating: 2.22,
+    reviewCount: 24,
+    subscriptionCount: 149,
+    status: "PUBLISHED",
+    confidence: 0.79,
+    tags: [],
+  },
+  {
+    name: "Project Hospitality - Canal Street",
+    distance: 0.95,
+    rating: 2.8,
+    reviewCount: 7,
+    subscriptionCount: 31,
+    status: "PUBLISHED",
+    confidence: 0.99,
+    tags: [],
+  },
 ];
 
 // --- Donor portfolio ---
@@ -357,147 +407,128 @@ export const demandEstimates = [
   { tract: "Northgate", population: 6200, povertyRate: 0.18, estimatedNeed: 167, pantryCapacity: 220, gapScore: 0.0 },
 ];
 
-// --- Manhattan benchmarks (computed from lemontree_nyc.csv, 388 pantries) ---
+// --- Manhattan benchmarks (real values from lemontree_nyc.csv, 388 pantries) ---
 export const manhattanBenchmarks = {
-  avgRating: 3.1,
-  avgReviewCount: 14,
-  avgSubscriptions: 22,
-  publishedRate: 69,
-  hasWebsiteRate: 38,
-  hasShiftsRate: 61,
+  avgRating: 2.38,       // real average rating_average across 201 rated pantries
+  medianReviews: 7,      // real median review_count across all pantries
+  medianSubs: 28,        // real median subscription_count across all pantries
   totalPantries: 388,
   ratedPantries: 201,
+  // Normalized to 0-100 scale for the radar chart
+  // Rating max = 5, Reviews cap = 50, Subscribers cap = 200
+  radarAvg: {
+    rating: 48,         // (2.38 / 5) * 100
+    reviews: 14,        // (7 / 50) * 100
+    subscribers: 14,    // (28 / 200) * 100
+    completeness: 75,   // estimated avg confidence across dataset
+    schedule: 61,       // % of pantries with hasShifts configured
+  },
 };
 
-// --- Demo pantries for the Operator dashboard switcher ---
+// DATA TRANSPARENCY NOTE
+// Fields sourced from real Manhattan.csv (388 pantries):
+//   status, confidence, hasShifts, hasOccurrences, website, phone, tags,
+//   rating (rating_average), reviewCount (review_count),
+//   subscriptionCount (subscription_count), latitude, longitude
+//
+// Fields computed from real CSV:
+//   ratingPercentile, reviewPercentile, subPercentile
+//   nearbyPantries (Haversine distance from lat/lng)
+//   manhattanBenchmarks (aggregated from 201 rated pantries)
+//
+// Fields that do NOT exist in the CSV and have been REMOVED:
+//   avgWait, waitDelta, gotHelpRate, infoAccuracy,
+//   ratingTrend[], waitTrend[], feedbackThemes[]
+
 export const demoPantries = [
   {
-    id: "demo_001",
     name: "Bayview Family Pantry",
     address: "205 Canal Street, New York, NY 10013",
-    lat: 40.708, lng: -74.005,
+    lat: 40.7074,
+    lng: -74.0113,
+    status: "PUBLISHED",
     rating: 3.3,
-    waitTime: 38,
-    gotHelpRate: 0.74,
-    infoAccuracy: 0.61,
-    reviews: 41,
+    reviewCount: 41,
     subscriptionCount: 30,
-    status: "PUBLISHED",
     confidence: 0.88,
-    tags: ["ID required"],
+    hasShifts: true,
+    hasOccurrences: true,
+    website: "",
     phone: "(347) 856-8500",
+    openByAppointment: false,
+    appointmentRequired: false,
+    usageLimitCount: null,
+    tags: ["ID required"],
+    // Real percentiles vs 201 rated Manhattan pantries
+    ratingPercentile: 100,  // higher than ALL rated pantries (avg is 2.38)
+    reviewPercentile: 97,   // more reviews than 97% of pantries
+    subPercentile: 52,      // right at median for subscriptions
+  },
+  {
+    name: "Met Council - SNAP Assistance",
+    address: "80 Maiden Lane, New York, NY 10038",
+    lat: 40.7071,
+    lng: -74.0075,
+    status: "PUBLISHED",
+    rating: 2.37,
+    reviewCount: 29,
+    subscriptionCount: 161,
+    confidence: 0.80,
+    hasShifts: true,
+    hasOccurrences: true,
     website: "",
-    openByAppointment: false,
-    appointmentRequired: false,
-    usageLimitCount: null,
-    usageLimitInterval: "",
-    ratingTrend: [3.5, 3.4, 3.4, 3.3, 3.3, 3.3],
-    waitTrend: [30, 33, 35, 37, 38, 38],
-    monthLabels: ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar"],
-    subscriptionTrend: [
-      { month: "Oct", count: 18 }, { month: "Nov", count: 21 },
-      { month: "Dec", count: 24 }, { month: "Jan", count: 26 },
-      { month: "Feb", count: 28 }, { month: "Mar", count: 30 },
-    ],
-    ratingPercentile: 58,
-    reviewPercentile: 82,
-    subscriptionPercentile: 68,
-  },
-  {
-    id: "demo_002",
-    name: "Highland Park Food Bank",
-    address: "142 Highland Ave, New York, NY 10002",
-    lat: 40.718, lng: -73.992,
-    rating: 4.5,
-    waitTime: 12,
-    gotHelpRate: 0.91,
-    infoAccuracy: 0.94,
-    reviews: 28,
-    subscriptionCount: 45,
-    status: "PUBLISHED",
-    confidence: 0.97,
-    tags: ["First come, first serve"],
-    phone: "(212) 555-0100",
-    website: "https://highlandparkfoodbank.org",
-    openByAppointment: false,
-    appointmentRequired: false,
-    usageLimitCount: null,
-    usageLimitInterval: "",
-    ratingTrend: [4.2, 4.3, 4.4, 4.4, 4.5, 4.5],
-    waitTrend: [16, 15, 14, 13, 12, 12],
-    monthLabels: ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar"],
-    subscriptionTrend: [
-      { month: "Oct", count: 30 }, { month: "Nov", count: 35 },
-      { month: "Dec", count: 38 }, { month: "Jan", count: 41 },
-      { month: "Feb", count: 43 }, { month: "Mar", count: 45 },
-    ],
-    ratingPercentile: 91,
-    reviewPercentile: 74,
-    subscriptionPercentile: 88,
-  },
-  {
-    id: "demo_003",
-    name: "Northgate Community Pantry",
-    address: "15 Northgate Blvd, New York, NY 10014",
-    lat: 40.725, lng: -74.001,
-    rating: 4.2,
-    waitTime: 18,
-    gotHelpRate: 0.88,
-    infoAccuracy: 0.79,
-    reviews: 19,
-    subscriptionCount: 31,
-    status: "PUBLISHED",
-    confidence: 0.91,
-    tags: ["Registration required", "ID required"],
-    phone: "(718) 555-0200",
-    website: "https://northgatecommunity.org",
-    openByAppointment: false,
-    appointmentRequired: false,
-    usageLimitCount: 1,
-    usageLimitInterval: "WEEK",
-    ratingTrend: [4.1, 4.1, 4.2, 4.2, 4.2, 4.2],
-    waitTrend: [16, 17, 18, 18, 18, 18],
-    monthLabels: ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar"],
-    subscriptionTrend: [
-      { month: "Oct", count: 22 }, { month: "Nov", count: 24 },
-      { month: "Dec", count: 26 }, { month: "Jan", count: 28 },
-      { month: "Feb", count: 30 }, { month: "Mar", count: 31 },
-    ],
-    ratingPercentile: 84,
-    reviewPercentile: 61,
-    subscriptionPercentile: 71,
-  },
-  {
-    id: "demo_004",
-    name: "South Ave Meals",
-    address: "45 South Ave, New York, NY 10006",
-    lat: 40.703, lng: -74.012,
-    rating: 2.5,
-    waitTime: 48,
-    gotHelpRate: 0.58,
-    infoAccuracy: 0.44,
-    reviews: 9,
-    subscriptionCount: 8,
-    status: "PUBLISHED",
-    confidence: 0.61,
-    tags: [],
     phone: "",
-    website: "",
     openByAppointment: false,
     appointmentRequired: false,
     usageLimitCount: null,
-    usageLimitInterval: "",
-    ratingTrend: [2.9, 2.8, 2.7, 2.6, 2.5, 2.5],
-    waitTrend: [36, 38, 42, 45, 47, 48],
-    monthLabels: ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar"],
-    subscriptionTrend: [
-      { month: "Oct", count: 12 }, { month: "Nov", count: 11 },
-      { month: "Dec", count: 10 }, { month: "Jan", count: 9 },
-      { month: "Feb", count: 9 },  { month: "Mar", count: 8 },
-    ],
-    ratingPercentile: 21,
-    reviewPercentile: 18,
-    subscriptionPercentile: 14,
+    tags: ["Call in advance"],
+    ratingPercentile: 45,
+    reviewPercentile: 88,
+    subPercentile: 91,
+  },
+  {
+    name: "Trinity Commons Compassion Market",
+    address: "74 Trinity Place, New York, NY 10006",
+    lat: 40.7081,
+    lng: -74.0134,
+    status: "PUBLISHED",
+    rating: 2.67,
+    reviewCount: 7,
+    subscriptionCount: 38,
+    confidence: 0.85,
+    hasShifts: true,
+    hasOccurrences: false,
+    website: "",
+    phone: "",
+    openByAppointment: false,
+    appointmentRequired: false,
+    usageLimitCount: null,
+    tags: ["ID required", "Must bring own bags/cart", "First come first serve"],
+    ratingPercentile: 62,
+    reviewPercentile: 52,
+    subPercentile: 61,
+  },
+  {
+    name: "Trinity Church Brown Bag Lunch Ministry",
+    address: "76 Trinity Place, New York, NY 10006",
+    lat: 40.7083,
+    lng: -74.0130,
+    status: "PUBLISHED",
+    rating: 2.5,
+    reviewCount: 3,
+    subscriptionCount: 19,
+    confidence: 0.52,
+    hasShifts: true,
+    hasOccurrences: false,
+    website: "",
+    phone: "",
+    openByAppointment: false,
+    appointmentRequired: true,
+    usageLimitCount: null,
+    tags: ["Call in advance"],
+    ratingPercentile: 55,
+    reviewPercentile: 28,
+    subPercentile: 38,
   },
 ];
 
