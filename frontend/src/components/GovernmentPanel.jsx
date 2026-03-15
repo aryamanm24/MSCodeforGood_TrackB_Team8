@@ -207,7 +207,7 @@ function OverviewTab({ filters, govData }) {
             <ReferenceArea x1={0} x2={30} y1={1.5} y2={6} fill="#F0FDF4" fillOpacity={0.35}
               label={{ value: "LOW NEED / WELL SERVED", position: "insideBottomRight", style: { fill: "#166534", fontSize: 8, fontWeight: 600 } }} />
             <XAxis
-              type="number" dataKey="x" name="ALICE %" domain={[0, 80]}
+              type="number" dataKey="x" name="ALICE %" domain={[0, 100]}
               tick={{ fontSize: 9, fill: "#9CA3AF" }} axisLine={false} tickLine={false}
               label={{ value: "ALICE % (below threshold)", position: "insideBottom", offset: -14, style: { fontSize: 9, fill: "#9CA3AF" } }}
             />
@@ -278,7 +278,7 @@ function UnderservedTab({ filters, flyTo, govData }) {
     <div>
       {/* Summary strip */}
       <div style={{ background: "#F0FDF4", borderLeft: "3px solid #2D6A4F", borderRadius: "0 8px 8px 0", padding: "9px 12px", marginBottom: 14, fontSize: 12, color: "#166534", lineHeight: 1.5 }}>
-      32 ZIP codes across all 5 boroughs are critically underserved.
+      Top {govData?.underservedZips?.length ?? 0} ZIP codes identified as critically underserved.
       </div>
 
       {/* ZIP cards */}

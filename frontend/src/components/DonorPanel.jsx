@@ -10,8 +10,10 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  ReferenceLine,
+  ReferenceArea,
 } from "recharts";
-import { donorData as defaultDonorData } from "@/lib/mockData";
+import { donorData } from "@/lib/mockData";
 import Footer from "./Footer";
 
 // ── Borough background dot colors ────────────────────────────────────────────
@@ -23,15 +25,18 @@ const BOROUGH_BG_COLOR = {
   "Staten Island": "#C4B5FD",
 };
 
-// Borough color palette
-const BOROUGH_COLOR_MAP = {
-  Manhattan:     "#EF4444",
-  Brooklyn:      "#3B82F6",
-  Queens:        "#10B981",
-  Bronx:         "#F59E0B",
-  "Staten Island": "#8B5CF6",
-  Unknown:       "#9CA3AF",
-};
+// ── Borough bubble chart data (Fix 1) ────────────────────────────────────────
+// x = avg poverty, y = avg rating (reversed on axis), z = subscribersAtRisk
+const BOROUGH_BUBBLES = donorData.boroughImpact.map((b) => ({
+  borough: b.borough,
+  x: b.avgPoverty,
+  y: b.avgRating,
+  z: b.subscribersAtRisk,
+  impactScore: b.avgImpact,
+  resourceCount: b.resourceCount,
+  demandPerPantry: b.demandPerPantry,
+  color: b.color,
+}));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function impactBadge(score) {
@@ -70,7 +75,7 @@ function groupByZip(resources) {
 // ── Custom borough bubble shape with label ───────────────────────────────────
 function BoroughBubble({ cx, cy, payload }) {
   if (!cx || !cy) return null;
-  const r = Math.max(Math.sqrt(payload.z / 20), 10);
+  const r = Math.max(Math.sqrt(payload.z / 40), 12);
   return (
     <g>
       <circle cx={cx} cy={cy} r={r} fill={payload.color} fillOpacity={0.65} stroke={payload.color} strokeWidth={1.5} />
@@ -89,15 +94,15 @@ function BoroughBubble({ cx, cy, payload }) {
 // ── Custom shapes for full-network scatter ───────────────────────────────────
 function BgDot({ cx, cy, payload }) {
   if (!cx || !cy) return null;
-  return <circle cx={cx} cy={cy} r={4} fill={BOROUGH_BG_COLOR[payload.borough] ?? "#D1D5DB"} fillOpacity={0.55} />;
+  return <circle cx={cx} cy={cy} r={4} fill={BOROUGH_BG_COLOR[payload.borough] ?? "#D1D5DB"} fillOpacity={0.35} />;
 }
 
 function HaloDot({ cx, cy }) {
   if (!cx || !cy) return null;
   return (
     <g>
-      <circle cx={cx} cy={cy} r={12} fill="#EF4444" fillOpacity={0.15} />
-      <circle cx={cx} cy={cy} r={7}  fill="#EF4444" fillOpacity={0.85} />
+      <circle cx={cx} cy={cy} r={10} fill="#EF4444" fillOpacity={0.15} />
+      <circle cx={cx} cy={cy} r={6}  fill="#EF4444" fillOpacity={0.9} />
     </g>
   );
 }
@@ -145,82 +150,10 @@ function NetworkTooltip({ active, payload }) {
   );
 }
 
-// Derive donorData metrics from govData (real) or fall back to mock
-function buildDonorMetrics(govData) {
-  if (!govData?.boroughStats) return null;
-
-  const boroughKeys = ["Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"];
-  const boroughImpact = boroughKeys.map((name) => {
-    const key = name === "Staten Island" ? "StatenIsland" : name;
-    const stats = govData.boroughStats[key] ?? { total: 0, published: 0, unavailable: 0 };
-    const underservedInBorough = (govData.underservedZips ?? []).filter((z) => z.borough === name);
-    const avgPoverty = underservedInBorough.length > 0
-      ? underservedInBorough.reduce((s, z) => s + (z.poverty ?? 0), 0) / underservedInBorough.length : 20;
-    const aliceData = (govData.aliceSummary?.boroughs ?? []).find((b) => b.borough === name);
-    return {
-      borough: name,
-      avgRating: 2.5,
-      avgPoverty: Math.round(avgPoverty * 10) / 10,
-      resourceCount: stats.total,
-      avgImpact: stats.total > 0 ? Math.min(0.4 + avgPoverty / 100, 0.9) : 0.3,
-      subscribersAtRisk: aliceData?.belowAliceHH ?? Math.round(stats.published * 12),
-      demandPerPantry: underservedInBorough.length > 0
-        ? Math.round(underservedInBorough.reduce((s, z) => s + (z.snapPerPantry ?? 0), 0) / underservedInBorough.length) : 0,
-      color: BOROUGH_COLOR_MAP[name] ?? "#9CA3AF",
-    };
-  });
-
-  const sortedUnderserved = [...(govData.underservedZips ?? [])].sort((a, b) => b.needScore - a.needScore);
-  const topImpactResources = sortedUnderserved.slice(0, 8).map((z) => ({
-    name: z.neighborhood || `ZIP ${z.zip}`,
-    borough: z.borough,
-    zip: z.zip,
-    povertyRate: z.poverty,
-    rating: 2.3,
-    subscriptions: z.aliceHouseholds || z.foodInsecurity || 0,
-    impactScore: Math.min(z.needScore / 100, 0.95),
-    status: "PUBLISHED",
-    lat: z.lat,
-    lng: z.lng,
-  }));
-
-  const backgroundResources = sortedUnderserved.map((z) => ({
-    name: z.neighborhood || `ZIP ${z.zip}`,
-    borough: z.borough,
-    zip: z.zip,
-    poverty: z.poverty,
-    rating: 2.3,
-  }));
-
-  return {
-    boroughImpact,
-    topImpactResources,
-    backgroundResources,
-    network: { totalPantries: (govData.systemStats?.resourceTypes?.foodPantry ?? 0), totalSoupKitchens: (govData.systemStats?.resourceTypes?.soupKitchen ?? 0) },
-    methodology: "Impact score derived from ALICE % below threshold, poverty rate, and pantry coverage ratio. Data from LemonTree platform + ACS 2024.",
-  };
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
-export default function DonorPanel({ govData: govDataProp }) {
+export default function DonorPanel() {
   const [showWhy, setShowWhy] = useState(false);
   const [selected, setSelected] = useState(new Set());
-
-  const derivedDonorData = useMemo(() => buildDonorMetrics(govDataProp), [govDataProp]);
-  const donorData = derivedDonorData ?? defaultDonorData;
-
-  // Borough bubbles computed from real or mock data
-  const BOROUGH_BUBBLES = useMemo(() => donorData.boroughImpact.map((b) => ({
-    borough: b.borough,
-    x: b.avgPoverty,
-    y: b.avgRating,
-    z: b.subscribersAtRisk,
-    impactScore: b.avgImpact,
-    resourceCount: b.resourceCount,
-    demandPerPantry: b.demandPerPantry,
-    color: b.color,
-  })), [donorData]);
-
   const { network, topImpactResources, backgroundResources, methodology } = donorData;
 
   const zipGroups = useMemo(() => groupByZip(topImpactResources), [topImpactResources]);
@@ -318,7 +251,7 @@ export default function DonorPanel({ govData: govDataProp }) {
           Where is the need most concentrated?
         </div>
         <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 14 }}>
-          Bubble size = families depending on critical-need resources · X = poverty rate · Y = quality (lower = worse)
+          Bubble size = families relying on critical-need resources · Right &amp; top = highest priority
         </div>
         <div style={{ position: "relative" }}>
           <div style={{ position: "absolute", top: 4, right: 8, fontSize: 10, fontWeight: 600, color: "#DC2626", zIndex: 10 }}>
@@ -329,6 +262,17 @@ export default function DonorPanel({ govData: govDataProp }) {
           </div>
           <ResponsiveContainer width="100%" height={320}>
             <ScatterChart margin={{ top: 20, right: 20, bottom: 36, left: 0 }}>
+              {/* High-priority quadrant shading */}
+              <ReferenceArea
+                x1={30}
+                x2={40}
+                y1={1.5}
+                y2={2.3}
+                fill="#FEE2E2"
+                fillOpacity={0.4}
+                stroke="#FECACA"
+                strokeDasharray="3 3"
+              />
               <XAxis
                 type="number" dataKey="x"
                 domain={[0, 40]}
@@ -344,11 +288,32 @@ export default function DonorPanel({ govData: govDataProp }) {
                 axisLine={false} tickLine={false}
                 label={{ value: "Avg rating (lower = worse quality)", angle: -90, position: "insideLeft", offset: 10, style: { fontSize: 10, fill: "#9CA3AF" } }}
               />
+              {/* Threshold lines */}
+              <ReferenceLine
+                x={30}
+                stroke="#F97316"
+                strokeDasharray="4 2"
+                strokeWidth={1}
+                label={{ value: "Poverty ≥ 30%", position: "insideTopRight", fontSize: 9, fill: "#EA580C" }}
+              />
+              <ReferenceLine
+                y={2.5}
+                stroke="#EF4444"
+                strokeDasharray="4 2"
+                strokeWidth={1}
+                label={{ value: "Rating < 2.5", position: "insideRight", fontSize: 9, fill: "#B91C1C" }}
+              />
               <ZAxis type="number" dataKey="z" range={[80, 700]} />
               <Tooltip content={<BoroughTooltip />} cursor={false} />
               <Scatter data={BOROUGH_BUBBLES} shape={<BoroughBubble />} />
             </ScatterChart>
           </ResponsiveContainer>
+        </div>
+        {/* Simple legend for axes meaning */}
+        <div style={{ display: "flex", justifyContent: "center", gap: 16, marginTop: 8, fontSize: 11, color: "#6B7280" }}>
+          <span>→ Higher poverty</span>
+          <span>↑ Worse average rating</span>
+          <span>◯ Larger bubble = more families</span>
         </div>
         <div style={{ padding: "10px 12px", background: "#FEF2F2", borderLeft: "3px solid #EF4444", borderRadius: "0 8px 8px 0", fontSize: 12, color: "#991B1B", lineHeight: 1.5 }}>
           The Bronx sits in the top-right corner — highest poverty and worst average quality — with 5,304 subscribers at risk. It is the unambiguous highest-impact zone for donor funding.
@@ -388,10 +353,10 @@ export default function DonorPanel({ govData: govDataProp }) {
       {/* ── Fix 2: Full-network scatter ── */}
       <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, padding: "18px 20px", marginBottom: 20 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 3 }}>
-          The funding landscape — 703 scored resources
+          The funding landscape
         </div>
         <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 14 }}>
-          Highlighted = highest-impact opportunities · Gray dots = full network context
+          703 scored resources · Red = highest-impact opportunities · Gray = full network context
         </div>
         <div style={{ position: "relative" }}>
           <div style={{ position: "absolute", top: 6, right: 8, fontSize: 10, fontWeight: 600, color: "#DC2626", zIndex: 10, maxWidth: 180, textAlign: "right" }}>
@@ -399,6 +364,17 @@ export default function DonorPanel({ govData: govDataProp }) {
           </div>
           <ResponsiveContainer width="100%" height={300}>
             <ScatterChart margin={{ top: 10, right: 20, bottom: 28, left: 0 }}>
+              {/* High-impact target zone */}
+              <ReferenceArea
+                x1={30}
+                x2={45}
+                y1={1.5}
+                y2={2.5}
+                fill="#FEF2F2"
+                fillOpacity={0.5}
+                stroke="#FECACA"
+                strokeDasharray="3 3"
+              />
               <XAxis
                 type="number" dataKey="x"
                 domain={[0, 45]}
@@ -429,6 +405,9 @@ export default function DonorPanel({ govData: govDataProp }) {
               <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#EF4444" }} />
               Top impact opportunities
             </span>
+          </div>
+          <div style={{ fontSize: 11, color: "#6B7280", textAlign: "center", marginTop: 4 }}>
+            Most high-impact opportunities cluster in high-poverty ZIPs with ratings below 2.5, especially in the Bronx.
           </div>
         </div>
       </div>

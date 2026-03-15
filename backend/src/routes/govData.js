@@ -226,7 +226,7 @@ async function getGovData(req, res) {
     const zeroPantryZips = zips
       .filter((z) => (Number(z.pantry_count) || 0) === 0 && (Number(z.population) || 0) > 0)
       .sort((a, b) => (Number(b.population) || 0) - (Number(a.population) || 0))
-      .slice(0, 5)
+      .slice(0, 20)
       .map((z) => {
         const geo = getZipGeo(z.zip_code);
         const poverty = Number(z.poverty_rate_pct) || 0;
