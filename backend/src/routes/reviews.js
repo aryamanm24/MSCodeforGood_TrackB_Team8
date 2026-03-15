@@ -29,9 +29,15 @@ async function createReview(req, res) {
     did_not_attend_reason:
       attended === false ? (body.didNotAttendReason ?? null) : null,
 
-    rating: attended === true ? (body.rating ?? null) : null,
+    // Supabase smallint columns require integers; coerce decimals (e.g. 1.5 stars)
+    rating:
+      attended === true && body.rating != null
+        ? Math.round(Number(body.rating))
+        : null,
     wait_time_minutes:
-      attended === true ? (body.waitTimeMinutes ?? null) : null,
+      attended === true && body.waitTimeMinutes != null
+        ? Math.round(Number(body.waitTimeMinutes))
+        : null,
 
     information_accurate: body.informationAccurate ?? null,
     inaccuracy_types: Array.isArray(body.inaccuracyTypes) ? body.inaccuracyTypes : [],

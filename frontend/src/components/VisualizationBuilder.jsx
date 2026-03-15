@@ -19,7 +19,7 @@ import {
   Line,
   ReferenceLine,
 } from "recharts";
-import { govData, donorData } from "@/lib/mockData";
+import { govData as defaultGovData, donorData as defaultDonorData } from "@/lib/mockData";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -55,6 +55,10 @@ const DIMENSION_OPTIONS = [
   { value: "poverty-rating", label: "Poverty vs rating" },
   { value: "subscribers", label: "Subscribers by area" },
   { value: "barriers", label: "Access barriers" },
+  { value: "transit-access", label: "Transit access gaps" },
+  { value: "language-barriers", label: "Language barriers" },
+  { value: "senior-access", label: "Senior access" },
+  { value: "service-reliability", label: "Service reliability" },
 ];
 
 const METRIC_OPTIONS = [
@@ -65,6 +69,11 @@ const METRIC_OPTIONS = [
   { value: "food-insecure", label: "Food insecure population" },
   { value: "impact", label: "Impact score" },
   { value: "offline-pct", label: "Offline rate (%)" },
+  { value: "avg-closure-rate", label: "Avg closure rate" },
+  { value: "walkable-resources", label: "Walkable resources" },
+  { value: "no-vehicle-rate", label: "No-vehicle rate (%)" },
+  { value: "multilingual-pct", label: "Multilingual resources" },
+  { value: "alice-pct", label: "ALICE % (below threshold)" },
 ];
 
 const BOROUGHS = ["Manhattan", "Bronx", "Brooklyn", "Queens", "Staten Island"];
@@ -88,6 +97,9 @@ const QUICK_STARTS = [
   { chartType: "bar", dimension: "boroughs", metric: "impact", label: "Boroughs by impact" },
   { chartType: "bar", dimension: "barriers", metric: "count", label: "Access barriers" },
   { chartType: "scatter", dimension: "poverty-rating", metric: "avg-rating", label: "Need vs coverage" },
+  { chartType: "bar", dimension: "boroughs", metric: "alice-pct", label: "ALICE % by borough" },
+  { chartType: "bar", dimension: "transit-access", metric: "no-vehicle-rate", label: "Transit deserts" },
+  { chartType: "bar", dimension: "language-barriers", metric: "multilingual-pct", label: "Language gaps" },
 ];
 
 // ── AI Insight (Claude API) ───────────────────────────────────────────────────
@@ -137,12 +149,14 @@ Be specific with numbers. Be direct. No preamble. No "This chart shows..."`;
 
 // ── Government context for Read more ───────────────────────────────────────────
 
-function getGovContext() {
-  const { systemStats, reliability } = govData;
+function getGovContext(gd) {
+  const { systemStats, reliability, aliceSummary } = gd ?? {};
   return [
     `Citywide avg poverty (ZIP-weighted): ~21%`,
-    `Resources in underserved ZIPs: ${reliability.publishedInUnderservedZips} published`,
-    `Offline rate in high-need areas: ${reliability.pctOfflineInUnderserved}%`,
+    `Resources in underserved ZIPs: ${reliability?.publishedInUnderservedZips ?? 0} published`,
+    `Offline rate in high-need areas: ${reliability?.pctOfflineInUnderserved ?? 0}%`,
+    ...(aliceSummary ? [`ALICE: ${aliceSummary.pctBelowAlice}% of households below threshold`] : []),
+    ...(systemStats ? [`Avg rating: ${systemStats.avgRating?.toFixed(2) ?? "—"} / 5.0 across ${(systemStats.totalRated ?? 0).toLocaleString()} rated resources`] : []),
   ];
 }
 
@@ -355,6 +369,88 @@ function computeChartOutput(chartType, dimension, metric, filters, donorDataRef,
     };
   }
 
+  if (dimension === "transit-access") {
+    const transitGaps = govDataRef.transitGaps ?? [];
+    const filtered = boroughSet.size > 0 ? transitGaps.filter((g) => boroughSet.has(g.borough)) : transitGaps;
+    const data = filtered.map((g) => ({
+      name: `${g.zip} ${g.neighborhood ? `(${g.neighborhood.substring(0, 12)})` : ""}`.trim(),
+      value: metric === "walkable-resources" ? (g.resourcesWithinHalfMile ?? 0)
+        : metric === "no-vehicle-rate" ? (g.noVehicleRate ?? 0)
+        : (g.noVehicleRate ?? 0),
+      color: "#3B82F6",
+    }));
+    const lbl = metric === "walkable-resources" ? "Walkable resources (0.5mi)" : "No-vehicle rate (%)";
+    return {
+      type: "bar-vertical",
+      data: data.slice(0, 10),
+      metricLabel: lbl,
+      title: `Transit access gaps — ${lbl}`,
+      subtitle: `${filtered.length} transit-desert ZIPs · >25% no-vehicle + <2 walkable resources`,
+      tableHeaders: ["ZIP", "Borough", lbl],
+      tableRows: filtered.slice(0, 10).map((g) => [g.zip, g.borough, data[filtered.indexOf(g)]?.value]),
+    };
+  }
+
+  if (dimension === "language-barriers") {
+    const langGaps = govDataRef.languageGaps ?? [];
+    const filtered = boroughSet.size > 0 ? langGaps.filter((g) => boroughSet.has(g.borough)) : langGaps;
+    const data = filtered.map((g) => ({
+      name: `${g.zip}${g.neighborhood ? ` (${g.neighborhood.substring(0, 10)})` : ""}`,
+      value: metric === "multilingual-pct" ? (g.pctLimitedEnglish ?? 0) : (g.pantryCount ?? 0),
+      color: "#EF4444",
+    }));
+    const lbl = metric === "multilingual-pct" ? "Limited English (%)" : "Pantry count";
+    return {
+      type: "bar-vertical",
+      data: data.slice(0, 10),
+      metricLabel: lbl,
+      title: `Language barriers — ${lbl}`,
+      subtitle: `${filtered.length} ZIPs with >15% limited English and zero multilingual resources`,
+      tableHeaders: ["ZIP", "Borough", lbl],
+      tableRows: filtered.slice(0, 10).map((g, i) => [g.zip, g.borough, data[i]?.value]),
+    };
+  }
+
+  if (dimension === "senior-access") {
+    const seniorGaps = govDataRef.seniorAccessGaps ?? [];
+    const filtered = boroughSet.size > 0 ? seniorGaps.filter((g) => boroughSet.has(g.borough)) : seniorGaps;
+    const data = filtered.map((g) => ({
+      name: `${g.zip}${g.neighborhood ? ` (${g.neighborhood.substring(0, 10)})` : ""}`,
+      value: metric === "alice-pct" ? (g.pctSeniors ?? 0) : (g.apptOnlyShare ?? 0),
+      color: "#7C3AED",
+    }));
+    const lbl = metric === "alice-pct" ? "Senior population (%)" : "Appt-only share (%)";
+    return {
+      type: "bar-vertical",
+      data: data.slice(0, 10),
+      metricLabel: lbl,
+      title: `Senior access barriers — ${lbl}`,
+      subtitle: `${filtered.length} ZIPs with >15% seniors and >50% appointment-only resources`,
+      tableHeaders: ["ZIP", "Borough", lbl],
+      tableRows: filtered.slice(0, 10).map((g, i) => [g.zip, g.borough, data[i]?.value]),
+    };
+  }
+
+  if (dimension === "service-reliability") {
+    const relGaps = govDataRef.reliabilityGaps ?? [];
+    const filtered = boroughSet.size > 0 ? relGaps.filter((g) => boroughSet.has(g.borough)) : relGaps;
+    const data = filtered.map((g) => ({
+      name: `${g.zip}${g.neighborhood ? ` (${g.neighborhood.substring(0, 10)})` : ""}`,
+      value: metric === "avg-closure-rate" ? (g.avgSkipRangeCount ?? 0) : (g.confirmedOpenRate ?? 0),
+      color: "#D97706",
+    }));
+    const lbl = metric === "avg-closure-rate" ? "Avg skip events" : "Confirmed open rate (%)";
+    return {
+      type: "bar-vertical",
+      data: data.slice(0, 10),
+      metricLabel: lbl,
+      title: `Service reliability — ${lbl}`,
+      subtitle: `${filtered.length} high-poverty ZIPs with frequent closures`,
+      tableHeaders: ["ZIP", "Borough", lbl],
+      tableRows: filtered.slice(0, 10).map((g, i) => [g.zip, g.borough, data[i]?.value]),
+    };
+  }
+
   const metricFnMap = {
     "avg-rating": (b) => parseFloat(b.avgRating.toFixed(2)),
     count: (b) => (BOROUGH_TO_STAT_KEY[b.borough] ? govDataRef.boroughStats[BOROUGH_TO_STAT_KEY[b.borough]]?.total ?? b.resourceCount : b.resourceCount),
@@ -367,6 +463,29 @@ function computeChartOutput(chartType, dimension, metric, filters, donorDataRef,
       if (!key) return 0;
       const s = govDataRef.boroughStats[key];
       return s ? parseFloat(((s.unavailable / s.total) * 100).toFixed(1)) : 0;
+    },
+    "alice-pct": (b) => {
+      const found = (govDataRef.aliceSummary?.boroughs ?? []).find((ab) => ab.borough === b.borough);
+      return found ? parseFloat(found.avgAlicePct.toFixed(1)) : 0;
+    },
+    "avg-closure-rate": (b) => {
+      const found = (govDataRef.boroughReliabilityStats ?? []).find((r) => r.borough === b.borough);
+      return found ? parseFloat(found.avgSkipRangeCount.toFixed(1)) : 0;
+    },
+    "walkable-resources": (b) => {
+      const zipsForBorough = (govDataRef.underservedZips ?? []).filter((z) => z.borough === b.borough);
+      if (zipsForBorough.length === 0) return 0;
+      return parseFloat((zipsForBorough.reduce((s, z) => s + (z.resourcesWithinHalfMile ?? 0), 0) / zipsForBorough.length).toFixed(1));
+    },
+    "no-vehicle-rate": (b) => {
+      const zipsForBorough = (govDataRef.underservedZips ?? []).filter((z) => z.borough === b.borough);
+      if (zipsForBorough.length === 0) return 0;
+      return parseFloat((zipsForBorough.reduce((s, z) => s + (z.noVehicleRate ?? 0), 0) / zipsForBorough.length * 100).toFixed(1));
+    },
+    "multilingual-pct": (b) => {
+      const zipsForBorough = (govDataRef.underservedZips ?? []).filter((z) => z.borough === b.borough);
+      if (zipsForBorough.length === 0) return 0;
+      return parseFloat((zipsForBorough.reduce((s, z) => s + (z.pctLimitedEnglish ?? 0), 0) / zipsForBorough.length * 100).toFixed(1));
     },
   };
   const fn = metricFnMap[metric] ?? metricFnMap["avg-rating"];
@@ -514,14 +633,14 @@ function renderChart(output, overlayVisible, height = 320) {
 
 // ── Chart card component ──────────────────────────────────────────────────────
 
-function ChartCard({ chart, index, total, onMove, onRemove, onDuplicate, onCopyData, onToggleOverlay, onToggleExpanded }) {
+function ChartCard({ chart, index, total, onMove, onRemove, onDuplicate, onCopyData, onToggleOverlay, onToggleExpanded, govData: govDataProp }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const output = chart.output;
   const firstSentence = chart.aiInsight
     ? ((chart.aiInsight.match(/^[^.!?]+[.!?]?/) ?? [chart.aiInsight])[0] || "").trim()
     : "";
   const shortInsight = firstSentence ? (firstSentence.slice(0, 120) + (firstSentence.length > 120 ? "…" : "")) : "";
-  const govContext = getGovContext();
+  const govContext = getGovContext(govDataProp);
 
   return (
     <div style={{ ...CARD_STYLE, padding: "16px 20px" }}>
@@ -592,7 +711,9 @@ function ChartCard({ chart, index, total, onMove, onRemove, onDuplicate, onCopyD
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function VisualizationBuilder() {
+export default function VisualizationBuilder({ govData: govDataProp, donorData: donorDataProp }) {
+  const govData = govDataProp ?? defaultGovData;
+  const donorData = donorDataProp ?? defaultDonorData;
   const [charts, setCharts] = useState([]);
   const [chartType, setChartType] = useState("bar");
   const [dimension, setDimension] = useState("boroughs");
@@ -640,7 +761,7 @@ export default function VisualizationBuilder() {
         );
       });
     },
-    [chartType, dimension, metric, currentFilters]
+    [chartType, dimension, metric, currentFilters, govData, donorData]
   );
 
   const removeChart = useCallback((id) => {
@@ -855,6 +976,7 @@ export default function VisualizationBuilder() {
                 onCopyData={() => {}}
                 onToggleOverlay={() => toggleOverlay(chart.id)}
                 onToggleExpanded={() => toggleExpanded(chart.id)}
+                govData={govData}
               />
             ))}
           </div>
@@ -885,7 +1007,7 @@ export default function VisualizationBuilder() {
 
       {/* Report modal */}
       {reportModalOpen && (
-        <ReportModal charts={charts} onClose={() => setReportModalOpen(false)} />
+        <ReportModal charts={charts} onClose={() => setReportModalOpen(false)} govData={govData} />
       )}
 
       <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
@@ -895,7 +1017,7 @@ export default function VisualizationBuilder() {
 
 // ── Report modal ──────────────────────────────────────────────────────────────
 
-function ReportModal({ charts, onClose }) {
+function ReportModal({ charts, onClose, govData: govDataProp }) {
   return (
     <>
       <div
@@ -943,7 +1065,7 @@ function ReportModal({ charts, onClose }) {
             <div style={{ height: 200 }}>{chart.output && renderChart(chart.output, chart.overlayVisible, 200)}</div>
             {chart.aiInsight && <p style={{ fontSize: 12, color: "#374151", lineHeight: 1.7, marginTop: 12 }}>{chart.aiInsight}</p>}
             <ul style={{ fontSize: 11, color: "#6B7280", marginTop: 8, paddingLeft: 18 }}>
-              {getGovContext().map((line, j) => <li key={j}>{line}</li>)}
+              {getGovContext(govDataProp).map((line, j) => <li key={j}>{line}</li>)}
             </ul>
           </div>
         ))}

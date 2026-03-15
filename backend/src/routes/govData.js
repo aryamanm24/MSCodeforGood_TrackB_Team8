@@ -142,7 +142,18 @@ async function getGovData(req, res) {
     // ── 2) Fetch zip_demographics ──
     const { data: zipRows, error: zipError } = await supabase
       .from("zip_demographics")
-      .select("zip_code, borough, population, median_income, poverty_rate_pct, demand_proxy, pantry_count, total_resources, pantries_per_10k, demand_proxy_per_pantry");
+      .select([
+        "zip_code, borough, population, median_income, poverty_rate_pct, demand_proxy",
+        "pantry_count, total_resources, pantries_per_10k, demand_proxy_per_pantry",
+        "pct_below_alice, alice_households, total_households",
+        "fresh_produce_count, halal_kosher_count, no_id_required_count, multilingual_count",
+        "pct_limited_english, pct_foreign_born",
+        "pct_seniors_65_plus, pct_children_under_5",
+        "no_vehicle_rate, housing_burden_rate",
+        "resources_within_half_mile, resources_within_1_mile, nearest_resource_miles",
+        "appt_only_count, appt_only_share, walk_in_count",
+        "confirmed_open_rate, avg_skip_range_count",
+      ].join(", "));
 
     if (zipError) throw zipError;
     const zips = zipRows || [];
@@ -172,6 +183,10 @@ async function getGovData(req, res) {
       const pantryCount = Number(z.pantry_count) || 0;
       const demandProxy = Number(z.demand_proxy) || 0;
       const snapPerPantry = pantryCount > 0 ? Math.round((z.demand_proxy_per_pantry || 0)) : 0;
+      const alicePct = Number(z.pct_below_alice) || null;
+      const aliceHouseholds = Number(z.alice_households) || 0;
+      const alicePerPantry = pantryCount > 0 && aliceHouseholds ? Math.round(aliceHouseholds / pantryCount) : 0;
+      const aliceGap = alicePct != null ? Math.round((alicePct - poverty) * 10) / 10 : null;
       return {
         zip: String(z.zip_code),
         neighborhood: geo.neighborhood,
@@ -186,6 +201,25 @@ async function getGovData(req, res) {
         lat: geo.lat,
         lng: geo.lng,
         bounds: geo.bounds,
+        // ALICE fields
+        alicePct,
+        aliceHouseholds,
+        alicePerPantry,
+        aliceGap,
+        pantresPer10k: Number(z.pantries_per_10k) || 0,
+        // Demographic access fields
+        freshProduceCount: Number(z.fresh_produce_count) || 0,
+        halalKosherCount: Number(z.halal_kosher_count) || 0,
+        noIdRequiredCount: Number(z.no_id_required_count) || 0,
+        multilingualCount: Number(z.multilingual_count) || 0,
+        pctLimitedEnglish: Number(z.pct_limited_english) || 0,
+        pctForeignBorn: Number(z.pct_foreign_born) || 0,
+        pctSeniors: Number(z.pct_seniors_65_plus) || 0,
+        noVehicleRate: Number(z.no_vehicle_rate) || 0,
+        resourcesWithinHalfMile: Number(z.resources_within_half_mile) || 0,
+        apptOnlyShare: Number(z.appt_only_share) || 0,
+        confirmedOpenRate: Number(z.confirmed_open_rate) || 0,
+        avgSkipRangeCount: Number(z.avg_skip_range_count) || 0,
       };
     });
 
@@ -247,6 +281,147 @@ async function getGovData(req, res) {
       boroughStats[key] = stats;
     });
 
+    // ── 3) ALICE city-wide summary ──
+    const aliceBoroughMap = {};
+    let totalHH = 0;
+    let totalBelowAlice = 0;
+    zips.forEach((z) => {
+      const hh = Number(z.total_households) || 0;
+      const alicePct = Number(z.pct_below_alice) || 0;
+      const belowAlice = Math.round(hh * alicePct / 100);
+      totalHH += hh;
+      totalBelowAlice += belowAlice;
+      const b = (z.borough || "Unknown").trim();
+      if (!aliceBoroughMap[b]) aliceBoroughMap[b] = { totalHH: 0, belowAliceHH: 0, alicePctSum: 0, count: 0 };
+      aliceBoroughMap[b].totalHH += hh;
+      aliceBoroughMap[b].belowAliceHH += belowAlice;
+      aliceBoroughMap[b].alicePctSum += alicePct;
+      aliceBoroughMap[b].count += 1;
+    });
+    const aliceSummary = {
+      totalHouseholds: totalHH,
+      householdsBelowAlice: totalBelowAlice,
+      pctBelowAlice: totalHH > 0 ? Math.round((totalBelowAlice / totalHH) * 1000) / 10 : 0,
+      boroughs: Object.entries(aliceBoroughMap)
+        .filter(([b]) => b !== "Unknown")
+        .map(([borough, d]) => ({
+          borough,
+          avgAlicePct: d.count > 0 ? Math.round((d.alicePctSum / d.count) * 10) / 10 : 0,
+          totalHH: d.totalHH,
+          belowAliceHH: d.belowAliceHH,
+        }))
+        .sort((a, b) => b.avgAlicePct - a.avgAlicePct),
+    };
+
+    // ── 4) Language access gaps (>15% limited English, 0 multilingual resources) ──
+    const languageGaps = zips
+      .filter((z) => (Number(z.pct_limited_english) || 0) > 0.15 && (Number(z.multilingual_count) || 0) === 0)
+      .sort((a, b) => (Number(b.pct_limited_english) || 0) - (Number(a.pct_limited_english) || 0))
+      .slice(0, 10)
+      .map((z) => {
+        const geo = getZipGeo(z.zip_code);
+        return {
+          zip: String(z.zip_code),
+          borough: z.borough || "Unknown",
+          neighborhood: geo.neighborhood,
+          pctLimitedEnglish: Math.round((Number(z.pct_limited_english) || 0) * 1000) / 10,
+          pctForeignBorn: Math.round((Number(z.pct_foreign_born) || 0) * 1000) / 10,
+          pantryCount: Number(z.pantry_count) || 0,
+          population: Number(z.population) || 0,
+        };
+      });
+
+    // ── 5) Transit/proximity gaps (high no-vehicle rate + low walkable resources) ──
+    const transitGaps = zips
+      .filter((z) => (Number(z.no_vehicle_rate) || 0) > 0.25 && (Number(z.resources_within_half_mile) || 0) < 2)
+      .sort((a, b) => (Number(b.no_vehicle_rate) || 0) - (Number(a.no_vehicle_rate) || 0))
+      .slice(0, 10)
+      .map((z) => {
+        const geo = getZipGeo(z.zip_code);
+        return {
+          zip: String(z.zip_code),
+          borough: z.borough || "Unknown",
+          neighborhood: geo.neighborhood,
+          noVehicleRate: Math.round((Number(z.no_vehicle_rate) || 0) * 1000) / 10,
+          resourcesWithinHalfMile: Number(z.resources_within_half_mile) || 0,
+          nearestResourceMiles: Math.round((Number(z.nearest_resource_miles) || 0) * 10) / 10,
+          population: Number(z.population) || 0,
+          pantryCount: Number(z.pantry_count) || 0,
+          poverty: Math.round((Number(z.poverty_rate_pct) || 0) * 100) / 100,
+        };
+      });
+
+    // ── 6) Dietary access gaps (pantries exist but none serve halal/kosher) ──
+    const dietaryGaps = zips
+      .filter((z) => (Number(z.pantry_count) || 0) > 0 && (Number(z.halal_kosher_count) || 0) === 0)
+      .sort((a, b) => (Number(b.demand_proxy) || 0) - (Number(a.demand_proxy) || 0))
+      .slice(0, 10)
+      .map((z) => {
+        const geo = getZipGeo(z.zip_code);
+        return {
+          zip: String(z.zip_code),
+          borough: z.borough || "Unknown",
+          neighborhood: geo.neighborhood,
+          pantryCount: Number(z.pantry_count) || 0,
+          halalKosherCount: 0,
+          population: Number(z.population) || 0,
+          poverty: Math.round((Number(z.poverty_rate_pct) || 0) * 100) / 100,
+        };
+      });
+
+    // ── 7) Service reliability gaps (high closure frequency in high-poverty ZIPs) ──
+    const reliabilityGaps = zips
+      .filter((z) => (Number(z.avg_skip_range_count) || 0) > 2 && (Number(z.poverty_rate_pct) || 0) > 20)
+      .sort((a, b) => (Number(b.avg_skip_range_count) || 0) - (Number(a.avg_skip_range_count) || 0))
+      .slice(0, 10)
+      .map((z) => {
+        const geo = getZipGeo(z.zip_code);
+        return {
+          zip: String(z.zip_code),
+          borough: z.borough || "Unknown",
+          neighborhood: geo.neighborhood,
+          avgSkipRangeCount: Math.round((Number(z.avg_skip_range_count) || 0) * 10) / 10,
+          confirmedOpenRate: Math.round((Number(z.confirmed_open_rate) || 0) * 1000) / 10,
+          pantryCount: Number(z.pantry_count) || 0,
+          poverty: Math.round((Number(z.poverty_rate_pct) || 0) * 100) / 100,
+        };
+      });
+
+    // ── 8) Senior access barriers (high senior pop + most resources appointment-only) ──
+    const seniorAccessGaps = zips
+      .filter((z) => (Number(z.pct_seniors_65_plus) || 0) > 0.15 && (Number(z.appt_only_share) || 0) > 0.5)
+      .sort((a, b) => (Number(b.pct_seniors_65_plus) || 0) - (Number(a.pct_seniors_65_plus) || 0))
+      .slice(0, 10)
+      .map((z) => {
+        const geo = getZipGeo(z.zip_code);
+        return {
+          zip: String(z.zip_code),
+          borough: z.borough || "Unknown",
+          neighborhood: geo.neighborhood,
+          pctSeniors: Math.round((Number(z.pct_seniors_65_plus) || 0) * 1000) / 10,
+          apptOnlyShare: Math.round((Number(z.appt_only_share) || 0) * 1000) / 10,
+          walkInCount: Number(z.walk_in_count) || 0,
+          pantryCount: Number(z.pantry_count) || 0,
+          population: Number(z.population) || 0,
+        };
+      });
+
+    // ── 9) Borough-level reliability summary (for VisualizationBuilder) ──
+    const boroughReliability = {};
+    zips.forEach((z) => {
+      const b = (z.borough || "Unknown").trim();
+      if (b === "Unknown") return;
+      if (!boroughReliability[b]) boroughReliability[b] = { confirmedOpenRateSum: 0, avgSkipSum: 0, count: 0 };
+      boroughReliability[b].confirmedOpenRateSum += Number(z.confirmed_open_rate) || 0;
+      boroughReliability[b].avgSkipSum += Number(z.avg_skip_range_count) || 0;
+      boroughReliability[b].count += 1;
+    });
+    const boroughReliabilityStats = Object.entries(boroughReliability).map(([borough, d]) => ({
+      borough,
+      avgConfirmedOpenRate: d.count > 0 ? Math.round((d.confirmedOpenRateSum / d.count) * 1000) / 10 : 0,
+      avgSkipRangeCount: d.count > 0 ? Math.round((d.avgSkipSum / d.count) * 10) / 10 : 0,
+    }));
+
     res.json({
       systemStats: {
         totalResources,
@@ -278,6 +453,13 @@ async function getGovData(req, res) {
         topZips,
       },
       boroughStats,
+      aliceSummary,
+      languageGaps,
+      transitGaps,
+      dietaryGaps,
+      reliabilityGaps,
+      seniorAccessGaps,
+      boroughReliabilityStats,
     });
   } catch (err) {
     console.error("[gov/data] error:", err.message || err);

@@ -449,9 +449,10 @@ export default function MapView({
       }
 
       // Find nearest underserved or zero-pantry ZIP to the clicked point
+      const gd = govDataRef.current ?? {};
       const candidateZips = [
-        ...(govData.underservedZips ?? []),
-        ...(govData.zeroPantryZips ?? []),
+        ...(gd.underservedZips ?? []),
+        ...(gd.zeroPantryZips ?? []),
       ];
 
       const nearest = candidateZips.reduce(

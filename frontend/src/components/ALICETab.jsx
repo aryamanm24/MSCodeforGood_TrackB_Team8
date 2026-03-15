@@ -10,7 +10,7 @@ import { useState } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
-import { govData } from "@/lib/mockData";
+import { govData as mockGovData } from "@/lib/mockData";
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -30,12 +30,17 @@ function boroughColor(b) {
 
 // ── sub-components ────────────────────────────────────────────────────────
 
-function ALICESummaryCard() {
-  const { aliceSummary } = govData;
+function ALICESummaryCard({ govData }) {
+  const { aliceSummary } = govData ?? {};
   return (
     <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, padding: "16px", marginBottom: 12 }}>
       {/* Headline */}
-      <div style={{ display: "flex", gap: 0, marginBottom: 14 }}>
+      {!aliceSummary && (
+        <div style={{ fontSize: 12, color: "#9CA3AF", textAlign: "center", padding: "16px 0" }}>
+          ALICE summary loading — connect to live data
+        </div>
+      )}
+      {aliceSummary && <div style={{ display: "flex", gap: 0, marginBottom: 14 }}>
         <div style={{ flex: 1, paddingRight: 20, borderRight: "1px solid #E5E7EB" }}>
           <div style={{ fontSize: 36, fontWeight: 800, color: "#111827", lineHeight: 1 }}>
             {aliceSummary.pctBelowAlice}%
@@ -44,7 +49,7 @@ function ALICESummaryCard() {
             of NYC households below ALICE threshold
           </div>
           <div style={{ fontSize: 11, color: "#374151", marginTop: 4, fontWeight: 600 }}>
-            ~{(aliceSummary.householdsBelowAlice / 1000000).toFixed(1)}M households
+            ~{((aliceSummary.householdsBelowAlice ?? 0) / 1000000).toFixed(1)}M households
           </div>
         </div>
         <div style={{ flex: 1, paddingLeft: 20 }}>
@@ -57,7 +62,7 @@ function ALICESummaryCard() {
             NYC&apos;s basic cost-of-living budget. One financial setback away from crisis.
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* ALICE vs SNAP gap explainer */}
       <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderLeft: "4px solid #EF4444", borderRadius: "0 8px 8px 0", padding: "10px 12px", marginBottom: 14, fontSize: 12, color: "#991B1B", lineHeight: 1.6 }}>
@@ -67,39 +72,43 @@ function ALICESummaryCard() {
       </div>
 
       {/* Borough bar chart */}
-      <div style={{ fontSize: 11, fontWeight: 700, color: "#111827", marginBottom: 10 }}>
-        Average % below ALICE threshold by borough
-      </div>
-      <ResponsiveContainer width="100%" height={120}>
-        <BarChart
-          data={aliceSummary.boroughs}
-          layout="vertical"
-          margin={{ left: 0, right: 40, top: 0, bottom: 0 }}
-        >
-          <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 9, fill: "#9CA3AF" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}%`} />
-          <YAxis type="category" dataKey="borough" tick={{ fontSize: 10, fill: "#374151" }} width={72} axisLine={false} tickLine={false} />
-          <Tooltip
-            contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #E5E7EB" }}
-            formatter={(val, _n, p) => [`${val}% (${p.payload.belowAliceHH.toLocaleString()} HH)`, ""]}
-          />
-          <Bar dataKey="avgAlicePct" radius={[0, 5, 5, 0]} barSize={14}>
-            {aliceSummary.boroughs.map((b) => (
-              <Cell key={b.borough} fill={boroughColor(b.borough)} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+      {aliceSummary?.boroughs?.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#111827", marginBottom: 10 }}>
+            Average % below ALICE threshold by borough
+          </div>
+          <ResponsiveContainer width="100%" height={120}>
+            <BarChart
+              data={aliceSummary.boroughs}
+              layout="vertical"
+              margin={{ left: 0, right: 40, top: 0, bottom: 0 }}
+            >
+              <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 9, fill: "#9CA3AF" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}%`} />
+              <YAxis type="category" dataKey="borough" tick={{ fontSize: 10, fill: "#374151" }} width={72} axisLine={false} tickLine={false} />
+              <Tooltip
+                contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #E5E7EB" }}
+                formatter={(val, _n, p) => [`${val}% (${(p.payload.belowAliceHH ?? 0).toLocaleString()} HH)`, ""]}
+              />
+              <Bar dataKey="avgAlicePct" radius={[0, 5, 5, 0]} barSize={14}>
+                {aliceSummary.boroughs.map((b) => (
+                  <Cell key={b.borough} fill={boroughColor(b.borough)} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </>
+      )}
     </div>
   );
 }
 
-function MissingMiddleCards({ flyTo }) {
+function MissingMiddleCards({ flyTo, govData }) {
   const [selected, setSelected] = useState(null);
 
   // Sort by aliceGap descending — biggest "missing middle" first
-  const sorted = [...govData.underservedZips]
+  const sorted = [...(govData?.underservedZips ?? [])]
     .filter((z) => z.alicePct != null)
-    .sort((a, b) => b.aliceGap - a.aliceGap);
+    .sort((a, b) => (b.aliceGap ?? 0) - (a.aliceGap ?? 0));
 
   return (
     <div>
@@ -216,7 +225,8 @@ function MissingMiddleCards({ flyTo }) {
 
 // ── Main export ───────────────────────────────────────────────────────────
 
-export default function ALICETab({ flyTo }) {
+export default function ALICETab({ flyTo, govData: govDataProp }) {
+  const govData = govDataProp ?? mockGovData;
   return (
     <div>
       {/* What ALICE reveals */}
@@ -225,8 +235,8 @@ export default function ALICETab({ flyTo }) {
         East Harlem. The ALICE dataset reveals the full scope of struggling households.
       </div>
 
-      <ALICESummaryCard />
-      <MissingMiddleCards flyTo={flyTo} />
+      <ALICESummaryCard govData={govData} />
+      <MissingMiddleCards flyTo={flyTo} govData={govData} />
     </div>
   );
 }

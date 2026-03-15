@@ -94,7 +94,7 @@ export default function DashboardPage() {
         : "operator";
 
   useEffect(() => {
-    if (contentMode !== "government" || !apiUrl) return;
+    if ((contentMode !== "government" && contentMode !== "donor") || !apiUrl) return;
     let cancelled = false;
     Promise.all([
       fetch(`${apiUrl}/api/gov/data`).then((r) => (r.ok ? r.json() : null)),
@@ -267,7 +267,7 @@ export default function DashboardPage() {
               )}
             </div>
             <div className="flex-1 overflow-y-auto" key={panelKey}>
-              <DonorPanel />
+              <DonorPanel govData={govData ?? mockGovData} />
             </div>
           </div>
         );
@@ -331,7 +331,7 @@ export default function DashboardPage() {
       case "report-builder":
         return (
           <div className="h-full overflow-auto bg-[#FAFAF8]">
-            <ReportBuilder />
+            <ReportBuilder govData={govData ?? mockGovData} />
           </div>
         );
       case "funding-simulator":

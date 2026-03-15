@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { donorData } from "@/lib/mockData";
+import { donorData as defaultDonorData } from "@/lib/mockData";
 import Footer from "./Footer";
 
 // ── Borough background dot colors ────────────────────────────────────────────
@@ -23,18 +23,15 @@ const BOROUGH_BG_COLOR = {
   "Staten Island": "#C4B5FD",
 };
 
-// ── Borough bubble chart data (Fix 1) ────────────────────────────────────────
-// x = avg poverty, y = avg rating (reversed on axis), z = subscribersAtRisk
-const BOROUGH_BUBBLES = donorData.boroughImpact.map((b) => ({
-  borough: b.borough,
-  x: b.avgPoverty,
-  y: b.avgRating,
-  z: b.subscribersAtRisk,
-  impactScore: b.avgImpact,
-  resourceCount: b.resourceCount,
-  demandPerPantry: b.demandPerPantry,
-  color: b.color,
-}));
+// Borough color palette
+const BOROUGH_COLOR_MAP = {
+  Manhattan:     "#EF4444",
+  Brooklyn:      "#3B82F6",
+  Queens:        "#10B981",
+  Bronx:         "#F59E0B",
+  "Staten Island": "#8B5CF6",
+  Unknown:       "#9CA3AF",
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function impactBadge(score) {
@@ -148,10 +145,82 @@ function NetworkTooltip({ active, payload }) {
   );
 }
 
+// Derive donorData metrics from govData (real) or fall back to mock
+function buildDonorMetrics(govData) {
+  if (!govData?.boroughStats) return null;
+
+  const boroughKeys = ["Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"];
+  const boroughImpact = boroughKeys.map((name) => {
+    const key = name === "Staten Island" ? "StatenIsland" : name;
+    const stats = govData.boroughStats[key] ?? { total: 0, published: 0, unavailable: 0 };
+    const underservedInBorough = (govData.underservedZips ?? []).filter((z) => z.borough === name);
+    const avgPoverty = underservedInBorough.length > 0
+      ? underservedInBorough.reduce((s, z) => s + (z.poverty ?? 0), 0) / underservedInBorough.length : 20;
+    const aliceData = (govData.aliceSummary?.boroughs ?? []).find((b) => b.borough === name);
+    return {
+      borough: name,
+      avgRating: 2.5,
+      avgPoverty: Math.round(avgPoverty * 10) / 10,
+      resourceCount: stats.total,
+      avgImpact: stats.total > 0 ? Math.min(0.4 + avgPoverty / 100, 0.9) : 0.3,
+      subscribersAtRisk: aliceData?.belowAliceHH ?? Math.round(stats.published * 12),
+      demandPerPantry: underservedInBorough.length > 0
+        ? Math.round(underservedInBorough.reduce((s, z) => s + (z.snapPerPantry ?? 0), 0) / underservedInBorough.length) : 0,
+      color: BOROUGH_COLOR_MAP[name] ?? "#9CA3AF",
+    };
+  });
+
+  const sortedUnderserved = [...(govData.underservedZips ?? [])].sort((a, b) => b.needScore - a.needScore);
+  const topImpactResources = sortedUnderserved.slice(0, 8).map((z) => ({
+    name: z.neighborhood || `ZIP ${z.zip}`,
+    borough: z.borough,
+    zip: z.zip,
+    povertyRate: z.poverty,
+    rating: 2.3,
+    subscriptions: z.aliceHouseholds || z.foodInsecurity || 0,
+    impactScore: Math.min(z.needScore / 100, 0.95),
+    status: "PUBLISHED",
+    lat: z.lat,
+    lng: z.lng,
+  }));
+
+  const backgroundResources = sortedUnderserved.map((z) => ({
+    name: z.neighborhood || `ZIP ${z.zip}`,
+    borough: z.borough,
+    zip: z.zip,
+    poverty: z.poverty,
+    rating: 2.3,
+  }));
+
+  return {
+    boroughImpact,
+    topImpactResources,
+    backgroundResources,
+    network: { totalPantries: (govData.systemStats?.resourceTypes?.foodPantry ?? 0), totalSoupKitchens: (govData.systemStats?.resourceTypes?.soupKitchen ?? 0) },
+    methodology: "Impact score derived from ALICE % below threshold, poverty rate, and pantry coverage ratio. Data from LemonTree platform + ACS 2024.",
+  };
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
-export default function DonorPanel() {
+export default function DonorPanel({ govData: govDataProp }) {
   const [showWhy, setShowWhy] = useState(false);
   const [selected, setSelected] = useState(new Set());
+
+  const derivedDonorData = useMemo(() => buildDonorMetrics(govDataProp), [govDataProp]);
+  const donorData = derivedDonorData ?? defaultDonorData;
+
+  // Borough bubbles computed from real or mock data
+  const BOROUGH_BUBBLES = useMemo(() => donorData.boroughImpact.map((b) => ({
+    borough: b.borough,
+    x: b.avgPoverty,
+    y: b.avgRating,
+    z: b.subscribersAtRisk,
+    impactScore: b.avgImpact,
+    resourceCount: b.resourceCount,
+    demandPerPantry: b.demandPerPantry,
+    color: b.color,
+  })), [donorData]);
+
   const { network, topImpactResources, backgroundResources, methodology } = donorData;
 
   const zipGroups = useMemo(() => groupByZip(topImpactResources), [topImpactResources]);

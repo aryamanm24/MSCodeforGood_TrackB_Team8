@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { donorData } from "@/lib/mockData";
+import { donorData as defaultDonorData } from "@/lib/mockData";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -47,7 +47,7 @@ function fmtDollar(n) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function FundingSimulator() {
+export default function FundingSimulator({ donorData: donorDataProp }) {
   const [preset, setPreset]         = useState(25000);
   const [customAmt, setCustomAmt]   = useState("");
   const [focus, setFocus]           = useState("all");
@@ -59,6 +59,7 @@ export default function FundingSimulator() {
 
   const totalFunding = customAmt ? parseFloat(customAmt) || 0 : preset;
 
+  const donorData = donorDataProp ?? defaultDonorData;
   const { topImpactResources } = donorData;
 
   // ── Simulation logic ────────────────────────────────────────────────────────

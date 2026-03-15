@@ -31,7 +31,7 @@ const STUB_BTN_STYLE = {
   boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
 };
 
-export default function ReportBuilder() {
+export default function ReportBuilder({ govData, donorData }) {
   const [activeTab, setActiveTab] = useState("viz");
   const [copyFeedback, setCopyFeedback] = useState(false);
   const contentRef = useRef(null);
@@ -149,8 +149,8 @@ export default function ReportBuilder() {
 
       {/* Tab content */}
       <div ref={contentRef} style={{ padding: "20px 28px 48px" }}>
-        {activeTab === "viz" && <VisualizationBuilder />}
-        {activeTab === "sim" && <FundingSimulator />}
+        {activeTab === "viz" && <VisualizationBuilder govData={govData} donorData={donorData} />}
+        {activeTab === "sim" && <FundingSimulator donorData={donorData} />}
       </div>
     </div>
   );
