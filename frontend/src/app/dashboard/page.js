@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import CensusLayerControls from "@/components/CensusLayerControls.jsx";
@@ -9,6 +9,7 @@ import WorkspaceTabBar from "@/components/WorkspaceTabBar";
 import TabPicker from "@/components/TabPicker";
 import { resources, donorPortfolio, govData as mockGovData } from "@/lib/mockData";
 import { useAppData } from "@/lib/dataCache";
+import { buildDonorMetrics } from "@/components/DonorPanel";
 import { ratingColor } from "@/lib/helpers";
 import ExplorePage from "@/app/dashboard/explore/page";
 
@@ -82,6 +83,8 @@ export default function DashboardPage() {
   const mapInvalidateRef = useRef(null);
 
   const { govData, resources: govResources, govLoading } = useAppData();
+  const effectiveGovData = govData ?? mockGovData;
+  const derivedDonorData = useMemo(() => buildDonorMetrics(effectiveGovData), [effectiveGovData]);
 
   const activeTabRef = useRef(null);
   const addButtonRef = useRef(null);
@@ -310,7 +313,7 @@ export default function DashboardPage() {
       case "report-builder":
         return (
           <div className="h-full overflow-auto bg-[#FAFAF8]">
-            <ReportBuilder govData={govData ?? mockGovData} />
+            <ReportBuilder govData={govData ?? mockGovData} donorData={derivedDonorData} />
           </div>
         );
       case "funding-simulator":
