@@ -422,7 +422,34 @@ async function getGovData(req, res) {
       avgSkipRangeCount: d.count > 0 ? Math.round((d.avgSkipSum / d.count) * 10) / 10 : 0,
     }));
 
+    const zipDemographics = zips.map(z => ({
+      zip:                String(z.zip_code),
+      borough:            z.borough || "Unknown",
+      population:         Number(z.population) || 0,
+      medianIncome:       Number(z.median_income) || 0,
+      povertyRatePct:     Number(z.poverty_rate_pct) || 0,
+      alicePct:           Number(z.pct_below_alice) || 0,
+      pantryCount:        Number(z.pantry_count) || 0,
+      pantriesPer10k:     Number(z.pantries_per_10k) || 0,
+      confirmedOpenRate:  Math.round((Number(z.confirmed_open_rate) || 0) * 100),
+      avgSkipRangeCount:  Number(z.avg_skip_range_count) || 0,
+      noVehicleRate:      Math.round((Number(z.no_vehicle_rate) || 0) * 100),
+      apptOnlyShare:      Math.round((Number(z.appt_only_share) || 0) * 100),
+      pctLimitedEnglish:  Math.round((Number(z.pct_limited_english) || 0) * 100),
+      multilingualCount:  Number(z.multilingual_count) || 0,
+      noIdRequiredCount:  Number(z.no_id_required_count) || 0,
+      freshProduceCount:  Number(z.fresh_produce_count) || 0,
+      halalKosherCount:   Number(z.halal_kosher_count) || 0,
+      pctSeniors:         Math.round((Number(z.pct_seniors_65_plus) || 0) * 100),
+      pctChildren:        Math.round((Number(z.pct_children_under_5) || 0) * 100),
+      pctForeignBorn:     Math.round((Number(z.pct_foreign_born) || 0) * 100),
+      housingBurdenRate:  Math.round((Number(z.housing_burden_rate) || 0) * 100),
+      needScore:          Number(z.demand_proxy) || 0,
+      raceMajority:       z.race_majority || "Unknown",
+    }));
+
     res.json({
+      zipDemographics,
       systemStats: {
         totalResources,
         publishedResources: publishedCount,

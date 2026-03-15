@@ -21,6 +21,52 @@ import {
 } from "recharts";
 import { govData as defaultGovData } from "@/lib/mockData";
 
+// ── Variable catalog — all from real zip_demographics Supabase data ──────────
+const VARIABLES = [
+  // Need
+  { key: "alicePct",          label: "ALICE % below threshold",    unit: "%",  group: "Need",        description: "Households earning above poverty line but below survival budget" },
+  { key: "povertyRatePct",    label: "Poverty rate",               unit: "%",  group: "Need",        description: "% of residents below federal poverty line" },
+  { key: "needScore",         label: "Food insecurity estimate",   unit: "",   group: "Need",        description: "Estimated food-insecure population per ZIP" },
+  // Supply
+  { key: "pantryCount",       label: "Pantry count",               unit: "",   group: "Supply",      description: "Number of published food pantries" },
+  { key: "pantriesPer10k",    label: "Pantries per 10k residents", unit: "",   group: "Supply",      description: "Coverage normalized by population" },
+  { key: "confirmedOpenRate", label: "Confirmed open rate",        unit: "%",  group: "Supply",      description: "% of upcoming occurrences confirmed by pantry" },
+  { key: "avgSkipRangeCount", label: "Avg closures per pantry",    unit: "",   group: "Supply",      description: "Average number of closure events per pantry" },
+  { key: "freshProduceCount", label: "Fresh produce pantries",     unit: "",   group: "Supply",      description: "Pantries tagged with fresh produce availability" },
+  { key: "halalKosherCount",  label: "Halal / Kosher pantries",    unit: "",   group: "Supply",      description: "Dietary-specific resource availability" },
+  // Access
+  { key: "noVehicleRate",     label: "No vehicle rate",            unit: "%",  group: "Access",      description: "Households without a car — transit dependency" },
+  { key: "apptOnlyShare",     label: "Appointment-only share",     unit: "%",  group: "Access",      description: "% of pantries requiring appointments" },
+  { key: "pctLimitedEnglish", label: "Limited English speakers",   unit: "%",  group: "Access",      description: "Language barrier to food access" },
+  { key: "multilingualCount", label: "Multilingual resources",     unit: "",   group: "Access",      description: "Resources with multilingual support" },
+  { key: "noIdRequiredCount", label: "No-ID-required pantries",    unit: "",   group: "Access",      description: "Barrier-free access count" },
+  // Demographics
+  { key: "population",        label: "Population",                 unit: "",   group: "Demographics", description: "Total ZIP population" },
+  { key: "medianIncome",      label: "Median income",              unit: "$",  group: "Demographics", description: "Median household income" },
+  { key: "pctSeniors",        label: "Seniors 65+",                unit: "%",  group: "Demographics", description: "Senior population share" },
+  { key: "pctChildren",       label: "Children under 5",           unit: "%",  group: "Demographics", description: "Young children population share" },
+  { key: "pctForeignBorn",    label: "Foreign-born residents",     unit: "%",  group: "Demographics", description: "Immigrant community size" },
+  { key: "housingBurdenRate", label: "Housing burden rate",        unit: "%",  group: "Demographics", description: "Households spending >30% on housing" },
+];
+
+const VARIABLE_MAP = Object.fromEntries(VARIABLES.map(v => [v.key, v]));
+
+// Chart types valid for 1 variable (distribution and ranking)
+const CHART_TYPES_1VAR = [
+  { key: "bar-borough",  label: "Bar by borough",    icon: "▬", desc: "Average per borough, ranked" },
+  { key: "bar-zip",      label: "Bar by ZIP (top 20)", icon: "≡", desc: "Top 20 ZIPs ranked" },
+  { key: "histogram",    label: "Distribution",      icon: "▨", desc: "How values spread across all ZIPs" },
+  { key: "donut",        label: "Donut by borough",  icon: "◎", desc: "Borough share of total" },
+  { key: "ranked",       label: "Top & bottom 5",    icon: "↕", desc: "Best and worst ZIPs" },
+];
+
+// Chart types valid for 2 variables (relationships)
+const CHART_TYPES_2VAR = [
+  { key: "scatter",      label: "Scatter plot",      icon: "⬤", desc: "One dot per ZIP, find correlations" },
+  { key: "bar-grouped",  label: "Grouped bar",       icon: "▬▬", desc: "Compare two metrics side by side per borough" },
+  { key: "bar-color",    label: "Bar + color",       icon: "▬◎", desc: "Rank by first metric, color by second" },
+];
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MONO = { fontFamily: "'Courier New', monospace" };
@@ -39,89 +85,415 @@ const DOT_GRID = {
   backgroundSize: "24px 24px",
 };
 
-const CHART_TYPES = [
-  { id: "bar", icon: "📊", label: "Bar chart" },
-  { id: "line", icon: "📈", label: "Line chart" },
-  { id: "scatter", icon: "🔵", label: "Scatter plot" },
-  { id: "donut", icon: "🍩", label: "Donut chart" },
-  { id: "map", icon: "🗺", label: "Map view" },
-  { id: "table", icon: "📋", label: "Data table" },
-];
-
-const DIMENSION_OPTIONS = [
-  { value: "boroughs", label: "Boroughs compared" },
-  { value: "zips", label: "ZIP codes ranked" },
-  { value: "types", label: "Resource types" },
-  { value: "poverty-rating", label: "Poverty vs rating" },
-  { value: "subscribers", label: "Subscribers by area" },
-  { value: "barriers", label: "Access barriers" },
-  { value: "transit-access", label: "Transit access gaps" },
-  { value: "language-barriers", label: "Language barriers" },
-  { value: "senior-access", label: "Senior access" },
-  { value: "service-reliability", label: "Service reliability" },
-];
-
-const METRIC_OPTIONS = [
-  { value: "avg-rating", label: "Average rating" },
-  { value: "count", label: "Number of resources" },
-  { value: "poverty", label: "Poverty rate (%)" },
-  { value: "subscribers", label: "Subscribers at risk" },
-  { value: "food-insecure", label: "Food insecure population" },
-  { value: "impact", label: "Impact score" },
-  { value: "offline-pct", label: "Offline rate (%)" },
-  { value: "avg-closure-rate", label: "Avg closure rate" },
-  { value: "walkable-resources", label: "Walkable resources" },
-  { value: "no-vehicle-rate", label: "No-vehicle rate (%)" },
-  { value: "multilingual-pct", label: "Multilingual resources" },
-  { value: "alice-pct", label: "ALICE % (below threshold)" },
-];
-
-const BOROUGHS = ["Manhattan", "Bronx", "Brooklyn", "Queens", "Staten Island"];
-const BOROUGH_TO_STAT_KEY = {
-  Bronx: "Bronx",
-  Brooklyn: "Brooklyn",
-  Manhattan: "Manhattan",
-  Queens: "Queens",
-  "Staten Island": "StatenIsland",
-};
-
-const BOROUGH_BG = {
-  Bronx: "#FCA5A5",
-  Brooklyn: "#FCD34D",
-  Manhattan: "#93C5FD",
-  Queens: "#6EE7B7",
-  "Staten Island": "#C4B5FD",
-};
-
 const QUICK_STARTS = [
-  { chartType: "bar", dimension: "boroughs", metric: "impact", label: "Boroughs by impact" },
-  { chartType: "bar", dimension: "barriers", metric: "count", label: "Access barriers" },
-  { chartType: "scatter", dimension: "poverty-rating", metric: "avg-rating", label: "Need vs coverage" },
-  { chartType: "bar", dimension: "boroughs", metric: "alice-pct", label: "ALICE % by borough" },
-  { chartType: "bar", dimension: "transit-access", metric: "no-vehicle-rate", label: "Transit deserts" },
-  { chartType: "bar", dimension: "language-barriers", metric: "multilingual-pct", label: "Language gaps" },
+  { label: "ALICE % vs pantry coverage",  xVar: "alicePct",         yVar: "pantriesPer10k",    chartType: "scatter" },
+  { label: "Poverty by borough",          xVar: "povertyRatePct",   yVar: null,                chartType: "bar-borough" },
+  { label: "Most underserved ZIPs",       xVar: "alicePct",         yVar: null,                chartType: "ranked" },
+  { label: "Income distribution",         xVar: "medianIncome",     yVar: null,                chartType: "histogram" },
+  { label: "Language vs multilingual",    xVar: "pctLimitedEnglish", yVar: "multilingualCount", chartType: "scatter" },
+  { label: "Fresh produce by borough",    xVar: "freshProduceCount", yVar: null,               chartType: "donut" },
+  { label: "Need vs transit barrier",     xVar: "alicePct",         yVar: "noVehicleRate",     chartType: "bar-grouped" },
+  { label: "Poverty + income ranked",     xVar: "povertyRatePct",   yVar: "medianIncome",      chartType: "bar-color" },
 ];
+
+const BOROUGH_COLORS = {
+  Manhattan:     "#93C5FD",
+  Brooklyn:      "#FCD34D",
+  Queens:        "#6EE7B7",
+  Bronx:         "#FCA5A5",
+  "Staten Island": "#C4B5FD",
+  Unknown:       "#D1D5DB",
+};
+
+const BOROUGHS = ["Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"];
+
+function formatVal(val, unit) {
+  if (unit === "$") return `$${Number(val).toLocaleString()}`;
+  if (unit === "%") return `${val}%`;
+  return Number(val).toLocaleString();
+}
+
+// ── 1-variable charts ────────────────────────────────────────────────────────
+
+function renderBarBorough(chart, zipDemographics) {
+  const v = VARIABLE_MAP[chart.xVar];
+  const data = BOROUGHS.map(b => {
+    const zips = zipDemographics.filter(z => z.borough === b);
+    const avg = zips.length
+      ? Math.round((zips.reduce((s, z) => s + (z[chart.xVar] || 0), 0) / zips.length) * 10) / 10
+      : 0;
+    return { name: b, value: avg, color: BOROUGH_COLORS[b] };
+  }).sort((a, b) => b.value - a.value);
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={data} layout="vertical" margin={{ left: 80, right: 20 }}>
+        <XAxis type="number" tick={{ fontSize: 10 }} axisLine={false} tickLine={false}
+          tickFormatter={val => formatVal(val, v.unit)} />
+        <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        <Tooltip formatter={val => [formatVal(val, v.unit), v.label]} />
+        <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+          {data.map(d => <Cell key={d.name} fill={d.color} fillOpacity={0.85} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function renderBarZip(chart, zipDemographics) {
+  const v = VARIABLE_MAP[chart.xVar];
+  const data = [...zipDemographics]
+    .filter(z => z[chart.xVar] != null)
+    .sort((a, b) => (b[chart.xVar] || 0) - (a[chart.xVar] || 0))
+    .slice(0, 20)
+    .map(z => ({
+      name: `${z.zip}`,
+      value: z[chart.xVar],
+      borough: z.borough,
+      color: BOROUGH_COLORS[z.borough] ?? "#D1D5DB",
+    }));
+
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={data} layout="vertical" margin={{ left: 48, right: 20 }}>
+        <XAxis type="number" tick={{ fontSize: 10 }} axisLine={false} tickLine={false}
+          tickFormatter={val => formatVal(val, v.unit)} />
+        <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+        <Tooltip formatter={val => [formatVal(val, v.unit), v.label]}
+          labelFormatter={label => {
+            const d = data.find(r => r.name === label);
+            return `${label} — ${d?.borough ?? ""}`;
+          }} />
+        <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+          {data.map(d => <Cell key={d.name} fill={d.color} fillOpacity={0.85} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function renderHistogram(chart, zipDemographics) {
+  const v = VARIABLE_MAP[chart.xVar];
+  const values = zipDemographics.map(z => z[chart.xVar]).filter(val => val != null && !isNaN(val));
+  if (!values.length) return <div style={{ color: "#9CA3AF", fontSize: 12, padding: 20 }}>No data</div>;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const binCount = 10;
+  const binWidth = (max - min) / binCount || 1;
+  const bins = Array.from({ length: binCount }, (_, i) => {
+    const lo = min + i * binWidth;
+    const hi = min + (i + 1) * binWidth;
+    return {
+      range: `${Math.round(lo)}${v.unit}`,
+      count: values.filter(val => val >= lo && (i === binCount - 1 ? val <= hi : val < hi)).length,
+    };
+  });
+
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={bins} margin={{ left: 0, right: 10, bottom: 20 }}>
+        <XAxis dataKey="range" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false}
+          label={{ value: "ZIP count", angle: -90, position: "insideLeft", fontSize: 10, fill: "#9CA3AF" }} />
+        <Tooltip formatter={val => [val, "ZIP codes"]} />
+        <Bar dataKey="count" fill="#93C5FD" fillOpacity={0.85} radius={[3, 3, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function renderDonut(chart, zipDemographics) {
+  const v = VARIABLE_MAP[chart.xVar];
+  const data = BOROUGHS.map(b => {
+    const zips = zipDemographics.filter(z => z.borough === b);
+    const total = zips.reduce((s, z) => s + (z[chart.xVar] || 0), 0);
+    return { name: b, value: Math.round(total), color: BOROUGH_COLORS[b] };
+  }).filter(d => d.value > 0);
+  const grandTotal = data.reduce((s, d) => s + d.value, 0);
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+      <ResponsiveContainer width={180} height={180}>
+        <PieChart>
+          <Pie data={data} dataKey="value" cx="50%" cy="50%"
+            innerRadius={50} outerRadius={80} paddingAngle={2}>
+            {data.map(d => <Cell key={d.name} fill={d.color} />)}
+          </Pie>
+          <Tooltip formatter={val => [formatVal(val, v.unit), ""]} />
+        </PieChart>
+      </ResponsiveContainer>
+      <div style={{ fontSize: 11, lineHeight: 2 }}>
+        {data.map(d => (
+          <div key={d.name} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: d.color, display: "inline-block" }} />
+            <span style={{ color: "#374151" }}>{d.name}</span>
+            <span style={{ color: "#6B7280", marginLeft: "auto", paddingLeft: 12 }}>
+              {formatVal(d.value, v.unit)}
+              <span style={{ color: "#9CA3AF", marginLeft: 4 }}>
+                ({grandTotal > 0 ? Math.round(d.value / grandTotal * 100) : 0}%)
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function renderRanked(chart, zipDemographics) {
+  const v = VARIABLE_MAP[chart.xVar];
+  const sorted = [...zipDemographics]
+    .filter(z => z[chart.xVar] != null)
+    .sort((a, b) => (b[chart.xVar] || 0) - (a[chart.xVar] || 0));
+  const top5 = sorted.slice(0, 5);
+  const bottom5 = sorted.slice(-5).reverse();
+
+  const Row = ({ z, rank, highlight }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0",
+      borderBottom: "1px solid #F3F4F6" }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%",
+        background: BOROUGH_COLORS[z.borough] ?? "#D1D5DB", flexShrink: 0 }} />
+      <span style={{ fontSize: 12, fontWeight: 600, color: "#111827", minWidth: 40 }}>{z.zip}</span>
+      <span style={{ fontSize: 11, color: "#6B7280", flex: 1 }}>{z.borough}</span>
+      <span style={{ fontSize: 12, fontWeight: 700,
+        color: highlight === "high" ? "#DC2626" : highlight === "low" ? "#059669" : "#374151" }}>
+        {formatVal(z[chart.xVar], v.unit)}
+      </span>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "#DC2626", marginBottom: 6 }}>
+          Highest — top 5
+        </div>
+        {top5.map((z, i) => <Row key={z.zip} z={z} rank={i + 1} highlight="high" />)}
+      </div>
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "#059669", marginBottom: 6 }}>
+          Lowest — bottom 5
+        </div>
+        {bottom5.map((z, i) => <Row key={z.zip} z={z} rank={i + 1} highlight="low" />)}
+      </div>
+    </div>
+  );
+}
+
+// ── 2-variable charts ────────────────────────────────────────────────────────
+
+function renderScatter(chart, zipDemographics) {
+  const xv = VARIABLE_MAP[chart.xVar];
+  const yv = VARIABLE_MAP[chart.yVar];
+  const data = zipDemographics
+    .filter(z => z[chart.xVar] != null && z[chart.yVar] != null)
+    .map(z => ({
+      x: z[chart.xVar],
+      y: z[chart.yVar],
+      zip: z.zip,
+      borough: z.borough,
+      color: BOROUGH_COLORS[z.borough] ?? "#D1D5DB",
+    }));
+
+  const CustomDot = ({ cx, cy, payload }) => {
+    if (!cx || !cy) return null;
+    return <circle cx={cx} cy={cy} r={5}
+      fill={payload.color} fillOpacity={0.75} stroke="none" />;
+  };
+
+  const ScatterTooltip = ({ active, payload }) => {
+    if (!active || !payload?.length) return null;
+    const d = payload[0]?.payload;
+    return (
+      <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8,
+        padding: "8px 12px", fontSize: 11, lineHeight: 1.8 }}>
+        <strong>{d.zip} — {d.borough}</strong><br />
+        {xv.label}: <strong>{formatVal(d.x, xv.unit)}</strong><br />
+        {yv.label}: <strong>{formatVal(d.y, yv.unit)}</strong>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <ResponsiveContainer width="100%" height={260}>
+        <ScatterChart margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+          <XAxis type="number" dataKey="x" name={xv.label}
+            tick={{ fontSize: 10 }} axisLine={false} tickLine={false}
+            tickFormatter={val => formatVal(val, xv.unit)}
+            label={{ value: xv.label, position: "insideBottom", offset: -16, style: { fontSize: 10, fill: "#9CA3AF" } }} />
+          <YAxis type="number" dataKey="y" name={yv.label}
+            tick={{ fontSize: 10 }} axisLine={false} tickLine={false}
+            tickFormatter={val => formatVal(val, yv.unit)}
+            label={{ value: yv.label, angle: -90, position: "insideLeft", style: { fontSize: 10, fill: "#9CA3AF" } }} />
+          <Tooltip content={<ScatterTooltip />} />
+          <Scatter data={data} shape={<CustomDot />} />
+        </ScatterChart>
+      </ResponsiveContainer>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center",
+        fontSize: 10, color: "#6B7280", marginTop: 4 }}>
+        {Object.entries(BOROUGH_COLORS).filter(([b]) => b !== "Unknown").map(([b, c]) => (
+          <span key={b} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: c }} />
+            {b}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function renderGroupedBar(chart, zipDemographics) {
+  const xv = VARIABLE_MAP[chart.xVar];
+  const yv = VARIABLE_MAP[chart.yVar];
+  const data = BOROUGHS.map(b => {
+    const zips = zipDemographics.filter(z => z.borough === b);
+    const avgX = zips.length ? Math.round(zips.reduce((s, z) => s + (z[chart.xVar] || 0), 0) / zips.length * 10) / 10 : 0;
+    const avgY = zips.length ? Math.round(zips.reduce((s, z) => s + (z[chart.yVar] || 0), 0) / zips.length * 10) / 10 : 0;
+    return { name: b.slice(0, 3), fullName: b, [chart.xVar]: avgX, [chart.yVar]: avgY };
+  });
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={data} margin={{ bottom: 10 }}>
+        <XAxis dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+        <Tooltip
+          formatter={(val, name) => {
+            const v = VARIABLE_MAP[name];
+            return [formatVal(val, v?.unit ?? ""), v?.label ?? name];
+          }}
+          labelFormatter={label => {
+            const d = data.find(r => r.name === label);
+            return d?.fullName ?? label;
+          }}
+        />
+        <Legend formatter={name => VARIABLE_MAP[name]?.label ?? name}
+          wrapperStyle={{ fontSize: 10 }} />
+        <Bar dataKey={chart.xVar} fill="#93C5FD" fillOpacity={0.85} radius={[3, 3, 0, 0]} />
+        <Bar dataKey={chart.yVar} fill="#FCA5A5" fillOpacity={0.85} radius={[3, 3, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function renderBarColor(chart, zipDemographics) {
+  const xv = VARIABLE_MAP[chart.xVar];
+  const yv = VARIABLE_MAP[chart.yVar];
+  const yValues = zipDemographics.map(z => z[chart.yVar] || 0);
+  const yMin = Math.min(...yValues);
+  const yMax = Math.max(...yValues);
+  const colorScale = (val) => {
+    const t = yMax > yMin ? (val - yMin) / (yMax - yMin) : 0;
+    const r = Math.round(252 * t + 147 * (1 - t));
+    const g = Math.round(165 * (1 - t) + 197 * (1 - t));
+    const b = Math.round(165 * t + 253 * (1 - t));
+    return `rgb(${r},${Math.round(165*(1-t)+197*t)},${b})`;
+  };
+
+  const data = [...zipDemographics]
+    .filter(z => z[chart.xVar] != null)
+    .sort((a, b) => (b[chart.xVar] || 0) - (a[chart.xVar] || 0))
+    .slice(0, 20)
+    .map(z => ({
+      name: z.zip,
+      value: z[chart.xVar],
+      colorVal: z[chart.yVar] || 0,
+      borough: z.borough,
+      color: colorScale(z[chart.yVar] || 0),
+    }));
+
+  return (
+    <div>
+      <ResponsiveContainer width="100%" height={280}>
+        <BarChart data={data} layout="vertical" margin={{ left: 44, right: 20 }}>
+          <XAxis type="number" tick={{ fontSize: 10 }} axisLine={false} tickLine={false}
+            tickFormatter={val => formatVal(val, xv.unit)} />
+          <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+          <Tooltip
+            formatter={(val, name, props) => [
+              formatVal(val, xv.unit),
+              `${xv.label} · ${yv.label}: ${formatVal(props.payload.colorVal, yv.unit)}`
+            ]}
+          />
+          <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+            {data.map(d => <Cell key={d.name} fill={d.color} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      <div style={{ fontSize: 10, color: "#6B7280", textAlign: "center", marginTop: 4 }}>
+        Bar length = {xv.label} · Color intensity = {yv.label}
+      </div>
+    </div>
+  );
+}
+
+// ── Master render dispatcher ──────────────────────────────────────────────────
+
+function renderChartContent(chart, zipDemographics) {
+  if (!zipDemographics?.length) {
+    return (
+      <div style={{ padding: 24, textAlign: "center", color: "#9CA3AF", fontSize: 12 }}>
+        Loading data...
+      </div>
+    );
+  }
+  if (!chart.xVar) {
+    return (
+      <div style={{ padding: 24, textAlign: "center", color: "#9CA3AF", fontSize: 12 }}>
+        Select a variable to build this chart.
+      </div>
+    );
+  }
+  switch (chart.chartType) {
+    case "bar-borough":  return renderBarBorough(chart, zipDemographics);
+    case "bar-zip":      return renderBarZip(chart, zipDemographics);
+    case "histogram":    return renderHistogram(chart, zipDemographics);
+    case "donut":        return renderDonut(chart, zipDemographics);
+    case "ranked":       return renderRanked(chart, zipDemographics);
+    case "scatter":      return renderScatter(chart, zipDemographics);
+    case "bar-grouped":  return renderGroupedBar(chart, zipDemographics);
+    case "bar-color":    return renderBarColor(chart, zipDemographics);
+    default:             return <div style={{ color: "#9CA3AF", fontSize: 12, padding: 20 }}>Unknown chart type.</div>;
+  }
+}
+
+// ── Auto-generate chart title ────────────────────────────────────────────────
+
+function autoTitle(chart) {
+  const xLabel = VARIABLE_MAP[chart.xVar]?.label ?? "—";
+  const yLabel = VARIABLE_MAP[chart.yVar]?.label;
+  const typeLabels = {
+    "bar-borough":  `${xLabel} by borough`,
+    "bar-zip":      `Top 20 ZIPs: ${xLabel}`,
+    "histogram":    `Distribution of ${xLabel}`,
+    "donut":        `${xLabel} — borough share`,
+    "ranked":       `Highest & lowest: ${xLabel}`,
+    "scatter":      yLabel ? `${xLabel} vs ${yLabel}` : xLabel,
+    "bar-grouped":  yLabel ? `${xLabel} & ${yLabel} by borough` : xLabel,
+    "bar-color":    yLabel ? `${xLabel} (colored by ${yLabel})` : xLabel,
+  };
+  return typeLabels[chart.chartType] ?? xLabel;
+}
 
 // ── AI Insight (Claude API) ───────────────────────────────────────────────────
 
-async function generateInsight(chartConfig, output) {
+async function generateInsight(chartConfig, output, zipDemographics) {
   const apiKey = process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY;
-  const chartData = output.data ?? output.bgData ?? output.topData ?? output.tableRows ?? [];
-  const dataPreview = Array.isArray(chartData) ? chartData.slice(0, 10) : [];
   const prompt = `You are analyzing food access data for LemonTree, a NYC nonprofit food resource finder.
 
-Chart: ${chartConfig.chartType} showing ${chartConfig.show} measured by ${chartConfig.metric}
+Chart: ${chartConfig.chartType} showing ${chartConfig.xVar} ${chartConfig.yVar ? `vs ${chartConfig.yVar}` : ""}
 
-Data: ${JSON.stringify(dataPreview)}
+Data context: Using real NYC ZIP code demographics.
 
 Write exactly 2 sentences:
 1. The single most important finding in this data
 2. One specific, actionable implication for food access policy or donor funding
 
-Be specific with numbers. Be direct. No preamble. No "This chart shows..."`;
+Be specific. Be direct. No preamble.`;
 
   if (!apiKey) {
-    return "Bronx shows the highest impact score (0.54) and highest poverty among boroughs — funding there reaches the most food-insecure families. Donors should prioritize multi-pantry portfolios in the Bronx to maximize reach.";
+    return "High-need areas often correlate with lower resource density, suggesting a need for targeted expansion. Donors should prioritize funding in these underserved zones to maximize impact.";
   }
 
   try {
@@ -141,9 +513,9 @@ Be specific with numbers. Be direct. No preamble. No "This chart shows..."`;
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     const text = data.content?.[0]?.text ?? "";
-    return text.trim() || "Key finding: High-need areas correlate with lower pantry ratings; targeted funding can improve both capacity and quality.";
+    return text.trim() || "Key finding: High-need areas correlate with lower resource density; targeted funding can improve access.";
   } catch {
-    return "Key finding: High-need areas correlate with lower pantry ratings; targeted funding can improve both capacity and quality.";
+    return "Key finding: High-need areas correlate with lower resource density; targeted funding can improve access.";
   }
 }
 
@@ -160,482 +532,10 @@ function getGovContext(gd) {
   ];
 }
 
-// ── Scatter shapes ────────────────────────────────────────────────────────────
-
-function BgDot({ cx, cy, payload }) {
-  if (!cx || !cy) return null;
-  const isUnderserved = payload.isUnderserved;
-  const fill = isUnderserved ? "#EF4444" : (BOROUGH_BG[payload.borough] ?? "#D1D5DB");
-  const opacity = isUnderserved ? 0.85 : 0.55;
-  return <circle cx={cx} cy={cy} r={4} fill={fill} fillOpacity={opacity} />;
-}
-
-function ScatterDotByUnderserved({ cx, cy, payload, r = 4 }) {
-  if (!cx || !cy) return null;
-  const isUnderserved = payload.isUnderserved;
-  const fill = isUnderserved ? "#EF4444" : (BOROUGH_BG[payload.borough] ?? "#D1D5DB");
-  const opacity = isUnderserved ? 0.9 : 0.55;
-  return <circle cx={cx} cy={cy} r={r} fill={fill} fillOpacity={opacity} />;
-}
-
-function HaloDot({ cx, cy }) {
-  if (!cx || !cy) return null;
-  return (
-    <g>
-      <circle cx={cx} cy={cy} r={11} fill="#EF4444" fillOpacity={0.15} />
-      <circle cx={cx} cy={cy} r={6} fill="#EF4444" fillOpacity={0.85} />
-    </g>
-  );
-}
-
-function ScatterTooltip({ active, payload }) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]?.payload;
-  if (!d) return null;
-  return (
-    <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 14px", fontSize: 11, lineHeight: 1.8, boxShadow: "0 2px 8px rgba(0,0,0,.1)", ...MONO }}>
-      {d.name && <><strong style={{ fontSize: 12, fontFamily: "DM Sans,sans-serif" }}>{d.name}</strong><br /></>}
-      Borough: <strong>{d.borough}</strong><br />
-      Poverty: <strong>{d.x ?? d.poverty}%</strong><br />
-      Rating: <strong>{d.y ?? d.rating}</strong><br />
-      {(d.subscriptions || d.subs) != null && <>Subscribers: <strong>{(d.subscriptions ?? d.subs).toLocaleString()}</strong></>}
-    </div>
-  );
-}
-
-// ── Chart data computation (accepts filters object) ─────────────────────────────
-
-function computeChartOutput(chartType, dimension, metric, filters, donorDataRef, govDataRef) {
-  const boroughImpact = donorDataRef.boroughImpact;
-  const topImpactResources = donorDataRef.topImpactResources;
-  const backgroundResources = donorDataRef.backgroundResources;
-  const { systemStats, underservedZips, accessBarriers } = govDataRef;
-  const boroughSet = filters.boroughs?.length ? new Set(filters.boroughs) : new Set();
-  const povertyFilter = filters.poverty ?? "all";
-  const minSubs = filters.minSubs ?? 0;
-  const statusFilter = filters.status ?? "all";
-
-  const filteredBoroughs = boroughSet.size === 0 ? boroughImpact : boroughImpact.filter((b) => boroughSet.has(b.borough));
-  let filteredZips = underservedZips;
-  if (boroughSet.size > 0) filteredZips = filteredZips.filter((z) => boroughSet.has(z.borough));
-  if (povertyFilter === "high") filteredZips = filteredZips.filter((z) => z.poverty >= 30);
-  if (povertyFilter === "medium") filteredZips = filteredZips.filter((z) => z.poverty >= 15 && z.poverty < 30);
-  if (povertyFilter === "low") filteredZips = filteredZips.filter((z) => z.poverty < 15);
-  let filteredResources = topImpactResources;
-  if (boroughSet.size > 0) filteredResources = filteredResources.filter((r) => boroughSet.has(r.borough));
-  filteredResources = filteredResources.filter((r) => (r.subscriptions ?? 0) >= minSubs);
-  if (statusFilter === "published") filteredResources = filteredResources.filter((r) => r.status === "PUBLISHED");
-
-  const metricLabel = METRIC_OPTIONS.find((m) => m.value === metric)?.label ?? metric;
-
-  if (chartType === "line") {
-    return { type: "placeholder", message: "Time-series data coming soon — LemonTree is building toward longitudinal tracking.", title: "Line chart", subtitle: "—" };
-  }
-  if (chartType === "map") {
-    return { type: "placeholder", message: "Navigate to the Government view for the interactive coverage map.", title: "Map view", subtitle: "—" };
-  }
-
-  if (chartType === "table") {
-    const data = filteredBoroughs;
-    const metricLabel = METRIC_OPTIONS.find((m) => m.value === metric)?.label ?? metric;
-    return {
-      type: "table-only",
-      title: `${metricLabel} by borough — raw data`,
-      subtitle: `Filtered to ${data.length} borough(s)`,
-      tableHeaders: ["Borough", "Avg rating", "Avg poverty", "Resources", "Avg impact", "Subscribers at risk"],
-      tableRows: data.map((b) => [
-        b.borough,
-        b.avgRating,
-        `${b.avgPoverty}%`,
-        b.resourceCount,
-        b.avgImpact.toFixed(3),
-        (b.subscribersAtRisk ?? "—").toLocaleString(),
-      ]),
-    };
-  }
-
-  if (chartType === "donut") {
-    const rt = systemStats.resourceTypes;
-    const data = [
-      { name: "Food pantry", value: rt.foodPantry, fill: "#2D6A4F" },
-      { name: "Soup kitchen", value: rt.soupKitchen, fill: "#F59E0B" },
-      { name: "Community fridge", value: rt.communityFridge, fill: "#3B82F6" },
-      { name: "Meal delivery", value: rt.mealDelivery, fill: "#8B5CF6" },
-      { name: "SNAP / EBT", value: rt.snapEbt, fill: "#9CA3AF" },
-    ].filter((d) => d.value > 0);
-    const total = data.reduce((s, d) => s + d.value, 0);
-    return { type: "donut", data, title: "Resource type distribution", subtitle: `${total.toLocaleString()} total · LemonTree NYC`, tableHeaders: ["Type", "Count"], tableRows: data.map((d) => [d.name, d.value.toLocaleString()]) };
-  }
-
-  if (chartType === "scatter" || dimension === "poverty-rating") {
-    const underservedZipSet = new Set(underservedZips.map((z) => z.zip));
-    const bg = backgroundResources.map((r) => ({
-      ...r, x: r.poverty, y: r.rating, borough: r.borough,
-      isUnderserved: false,
-    }));
-    const top = filteredResources.map((r) => ({
-      ...r, x: r.povertyRate, y: r.rating,
-      isUnderserved: underservedZipSet.has(r.zip),
-    }));
-    return {
-      type: "scatter",
-      bgData: bg,
-      topData: top,
-      title: "Poverty vs. rating — network landscape",
-      subtitle: "Red = top-impact opportunities · Colored = network",
-      tableHeaders: ["Resource", "Borough", "Poverty", "Rating"],
-      tableRows: filteredResources.slice(0, 5).map((r) => [r.name, r.borough, `${r.povertyRate}%`, r.rating]),
-    };
-  }
-
-  if (dimension === "barriers") {
-    const data = accessBarriers.barriers.slice(0, 8).map((b) => ({
-      name: b.tag.length > 30 ? b.tag.slice(0, 30) + "…" : b.tag,
-      fullName: b.tag,
-      value: b.count,
-      pct: b.pct,
-      color: b.restrictive ? "#EF4444" : "#60A5FA",
-    }));
-    return {
-      type: "bar-horizontal",
-      data,
-      metricLabel: "# resources",
-      title: "Access barriers — tag frequency",
-      subtitle: `${accessBarriers.totalPublished.toLocaleString()} published · Red = restrictive`,
-      tableHeaders: ["Tag", "Count"],
-      tableRows: data.map((d) => [d.fullName, d.value]),
-    };
-  }
-
-  if (dimension === "types") {
-    const rt = systemStats.resourceTypes;
-    const data = [
-      { name: "Food pantry", value: rt.foodPantry, color: "#2D6A4F" },
-      { name: "Soup kitchen", value: rt.soupKitchen, color: "#F59E0B" },
-      { name: "Community fridge", value: rt.communityFridge, color: "#3B82F6" },
-      { name: "Meal delivery", value: rt.mealDelivery, color: "#8B5CF6" },
-      { name: "SNAP / EBT", value: rt.snapEbt, color: "#9CA3AF" },
-    ].filter((d) => d.value > 0);
-    return {
-      type: "bar-vertical",
-      data,
-      metricLabel: "Count",
-      title: "Resources by type",
-      subtitle: `${systemStats.totalResources.toLocaleString()} total`,
-      tableHeaders: ["Type", "Count"],
-      tableRows: data.map((d) => [d.name, d.value.toLocaleString()]),
-    };
-  }
-
-  if (dimension === "zips") {
-    const metricMap = {
-      "avg-rating": (z) => z.needScore,
-      count: (z) => z.pantryCount,
-      poverty: (z) => z.poverty,
-      "food-insecure": (z) => z.foodInsecurity,
-      impact: (z) => z.needScore,
-      "offline-pct": (z) => z.needScore,
-      subscribers: (z) => z.snapPerPantry,
-    };
-    const fn = metricMap[metric] ?? metricMap.impact;
-    const lbl = metric === "poverty" ? "Poverty (%)" : metric === "food-insecure" ? "Food insecure" : "Value";
-    const data = filteredZips.map((z) => ({
-      name: z.zip,
-      value: fn(z),
-      label: z.neighborhood,
-      color: z.needScore >= 73 ? "#EF4444" : z.needScore >= 60 ? "#F59E0B" : "#F9A8D4",
-    }));
-    return {
-      type: "bar-vertical",
-      data,
-      metricLabel: lbl,
-      title: `${lbl} by underserved ZIP`,
-      subtitle: `${filteredZips.length} ZIPs · ACS 2024`,
-      tableHeaders: ["ZIP", "Borough", lbl],
-      tableRows: filteredZips.map((z, i) => [z.zip, z.borough, data[i]?.value]),
-    };
-  }
-
-  if (dimension === "subscribers") {
-    const data = filteredBoroughs.map((b) => ({ name: b.borough, value: b.subscribersAtRisk ?? 0, color: b.color }));
-    return {
-      type: "bar-horizontal",
-      data,
-      metricLabel: "Subscribers at risk",
-      title: "Subscribers at risk by borough",
-      subtitle: "People depending on critical-need resources",
-      tableHeaders: ["Borough", "Subscribers"],
-      tableRows: data.map((d) => [d.name, d.value]),
-    };
-  }
-
-  if (dimension === "transit-access") {
-    const transitGaps = govDataRef.transitGaps ?? [];
-    const filtered = boroughSet.size > 0 ? transitGaps.filter((g) => boroughSet.has(g.borough)) : transitGaps;
-    const data = filtered.map((g) => ({
-      name: `${g.zip} ${g.neighborhood ? `(${g.neighborhood.substring(0, 12)})` : ""}`.trim(),
-      value: metric === "walkable-resources" ? (g.resourcesWithinHalfMile ?? 0)
-        : metric === "no-vehicle-rate" ? (g.noVehicleRate ?? 0)
-        : (g.noVehicleRate ?? 0),
-      color: "#3B82F6",
-    }));
-    const lbl = metric === "walkable-resources" ? "Walkable resources (0.5mi)" : "No-vehicle rate (%)";
-    return {
-      type: "bar-vertical",
-      data: data.slice(0, 10),
-      metricLabel: lbl,
-      title: `Transit access gaps — ${lbl}`,
-      subtitle: `${filtered.length} transit-desert ZIPs · >25% no-vehicle + <2 walkable resources`,
-      tableHeaders: ["ZIP", "Borough", lbl],
-      tableRows: filtered.slice(0, 10).map((g) => [g.zip, g.borough, data[filtered.indexOf(g)]?.value]),
-    };
-  }
-
-  if (dimension === "language-barriers") {
-    const langGaps = govDataRef.languageGaps ?? [];
-    const filtered = boroughSet.size > 0 ? langGaps.filter((g) => boroughSet.has(g.borough)) : langGaps;
-    const data = filtered.map((g) => ({
-      name: `${g.zip}${g.neighborhood ? ` (${g.neighborhood.substring(0, 10)})` : ""}`,
-      value: metric === "multilingual-pct" ? (g.pctLimitedEnglish ?? 0) : (g.pantryCount ?? 0),
-      color: "#EF4444",
-    }));
-    const lbl = metric === "multilingual-pct" ? "Limited English (%)" : "Pantry count";
-    return {
-      type: "bar-vertical",
-      data: data.slice(0, 10),
-      metricLabel: lbl,
-      title: `Language barriers — ${lbl}`,
-      subtitle: `${filtered.length} ZIPs with >15% limited English and zero multilingual resources`,
-      tableHeaders: ["ZIP", "Borough", lbl],
-      tableRows: filtered.slice(0, 10).map((g, i) => [g.zip, g.borough, data[i]?.value]),
-    };
-  }
-
-  if (dimension === "senior-access") {
-    const seniorGaps = govDataRef.seniorAccessGaps ?? [];
-    const filtered = boroughSet.size > 0 ? seniorGaps.filter((g) => boroughSet.has(g.borough)) : seniorGaps;
-    const data = filtered.map((g) => ({
-      name: `${g.zip}${g.neighborhood ? ` (${g.neighborhood.substring(0, 10)})` : ""}`,
-      value: metric === "alice-pct" ? (g.pctSeniors ?? 0) : (g.apptOnlyShare ?? 0),
-      color: "#7C3AED",
-    }));
-    const lbl = metric === "alice-pct" ? "Senior population (%)" : "Appt-only share (%)";
-    return {
-      type: "bar-vertical",
-      data: data.slice(0, 10),
-      metricLabel: lbl,
-      title: `Senior access barriers — ${lbl}`,
-      subtitle: `${filtered.length} ZIPs with >15% seniors and >50% appointment-only resources`,
-      tableHeaders: ["ZIP", "Borough", lbl],
-      tableRows: filtered.slice(0, 10).map((g, i) => [g.zip, g.borough, data[i]?.value]),
-    };
-  }
-
-  if (dimension === "service-reliability") {
-    const relGaps = govDataRef.reliabilityGaps ?? [];
-    const filtered = boroughSet.size > 0 ? relGaps.filter((g) => boroughSet.has(g.borough)) : relGaps;
-    const data = filtered.map((g) => ({
-      name: `${g.zip}${g.neighborhood ? ` (${g.neighborhood.substring(0, 10)})` : ""}`,
-      value: metric === "avg-closure-rate" ? (g.avgSkipRangeCount ?? 0) : (g.confirmedOpenRate ?? 0),
-      color: "#D97706",
-    }));
-    const lbl = metric === "avg-closure-rate" ? "Avg skip events" : "Confirmed open rate (%)";
-    return {
-      type: "bar-vertical",
-      data: data.slice(0, 10),
-      metricLabel: lbl,
-      title: `Service reliability — ${lbl}`,
-      subtitle: `${filtered.length} high-poverty ZIPs with frequent closures`,
-      tableHeaders: ["ZIP", "Borough", lbl],
-      tableRows: filtered.slice(0, 10).map((g, i) => [g.zip, g.borough, data[i]?.value]),
-    };
-  }
-
-  const metricFnMap = {
-    "avg-rating": (b) => parseFloat(b.avgRating.toFixed(2)),
-    count: (b) => (BOROUGH_TO_STAT_KEY[b.borough] ? govDataRef.boroughStats[BOROUGH_TO_STAT_KEY[b.borough]]?.total ?? b.resourceCount : b.resourceCount),
-    poverty: (b) => parseFloat(b.avgPoverty.toFixed(1)),
-    subscribers: (b) => b.subscribersAtRisk ?? 0,
-    "food-insecure": (b) => b.demandPerPantry ?? 0,
-    impact: (b) => parseFloat(b.avgImpact.toFixed(3)),
-    "offline-pct": (b) => {
-      const key = BOROUGH_TO_STAT_KEY[b.borough];
-      if (!key) return 0;
-      const s = govDataRef.boroughStats[key];
-      return s ? parseFloat(((s.unavailable / s.total) * 100).toFixed(1)) : 0;
-    },
-    "alice-pct": (b) => {
-      const found = (govDataRef.aliceSummary?.boroughs ?? []).find((ab) => ab.borough === b.borough);
-      return found ? parseFloat(found.avgAlicePct.toFixed(1)) : 0;
-    },
-    "avg-closure-rate": (b) => {
-      const found = (govDataRef.boroughReliabilityStats ?? []).find((r) => r.borough === b.borough);
-      return found ? parseFloat(found.avgSkipRangeCount.toFixed(1)) : 0;
-    },
-    "walkable-resources": (b) => {
-      const zipsForBorough = (govDataRef.underservedZips ?? []).filter((z) => z.borough === b.borough);
-      if (zipsForBorough.length === 0) return 0;
-      return parseFloat((zipsForBorough.reduce((s, z) => s + (z.resourcesWithinHalfMile ?? 0), 0) / zipsForBorough.length).toFixed(1));
-    },
-    "no-vehicle-rate": (b) => {
-      const zipsForBorough = (govDataRef.underservedZips ?? []).filter((z) => z.borough === b.borough);
-      if (zipsForBorough.length === 0) return 0;
-      return parseFloat((zipsForBorough.reduce((s, z) => s + (z.noVehicleRate ?? 0), 0) / zipsForBorough.length * 100).toFixed(1));
-    },
-    "multilingual-pct": (b) => {
-      const zipsForBorough = (govDataRef.underservedZips ?? []).filter((z) => z.borough === b.borough);
-      if (zipsForBorough.length === 0) return 0;
-      return parseFloat((zipsForBorough.reduce((s, z) => s + (z.pctLimitedEnglish ?? 0), 0) / zipsForBorough.length * 100).toFixed(1));
-    },
-  };
-  const fn = metricFnMap[metric] ?? metricFnMap["avg-rating"];
-  const data = filteredBoroughs.map((b) => ({
-    name: b.borough,
-    value: fn(b),
-    color: b.color,
-    povertyOverlay: b.avgPoverty,
-  }));
-  return {
-    type: "bar-horizontal",
-    data,
-    metricLabel,
-    title: `${metricLabel} by borough`,
-    subtitle: "Source: LemonTree · 1,976 resources · ACS 2024",
-    tableHeaders: ["Borough", metricLabel],
-    tableRows: data.map((d) => [d.name, d.value]),
-  };
-}
-
-// ── Chart renderer (320px height, optional overlay) ────────────────────────────
-
-function renderChart(output, overlayVisible, height = 320) {
-  if (!output) return null;
-
-  if (output.type === "placeholder") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height, border: "2px dashed #E5E7EB", borderRadius: 12, background: "#FAFAF8", gap: 10 }}>
-        <div style={{ fontSize: 28 }}>🚧</div>
-        <p style={{ fontSize: 12, color: "#6B7280", textAlign: "center", maxWidth: 320, margin: 0 }}>{output.message}</p>
-      </div>
-    );
-  }
-
-  if (output.type === "bar-horizontal") {
-    const showOverlay = overlayVisible && output.data.some((d) => d.povertyOverlay != null);
-    if (showOverlay && output.data.some((d) => d.povertyOverlay != null)) {
-      return (
-        <ResponsiveContainer width="100%" height={height}>
-          <ComposedChart data={output.data} layout="vertical" margin={{ top: 8, right: 48, bottom: 8, left: 120 }}>
-            <XAxis type="number" tick={{ fontSize: 10, ...MONO, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
-            <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
-            <Tooltip formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, output.metricLabel]} contentStyle={{ borderRadius: 8, fontSize: 11, ...MONO }} />
-            <Bar dataKey="value" radius={[0, 5, 5, 0]}>
-              {output.data.map((d, i) => <Cell key={i} fill={d.color ?? "#2D6A4F"} />)}
-            </Bar>
-            <Line type="monotone" dataKey="povertyOverlay" stroke="#F59E0B" strokeWidth={2} dot={false} name="Poverty %" yAxisId="right" />
-            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: "#F59E0B" }} axisLine={false} tickLine={false} />
-          </ComposedChart>
-        </ResponsiveContainer>
-      );
-    }
-    return (
-      <ResponsiveContainer width="100%" height={height}>
-        <BarChart data={output.data} layout="vertical" margin={{ top: 8, right: 16, bottom: 8, left: 120 }}>
-          <XAxis type="number" tick={{ fontSize: 10, ...MONO, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
-          <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
-          <Tooltip formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, output.metricLabel]} contentStyle={{ borderRadius: 8, fontSize: 11, ...MONO }} />
-          <Bar dataKey="value" radius={[0, 5, 5, 0]}>
-            {output.data.map((d, i) => <Cell key={i} fill={d.color ?? "#2D6A4F"} />)}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    );
-  }
-
-  if (output.type === "bar-vertical") {
-    const hasRating = output.metricLabel && output.metricLabel.toLowerCase().includes("rating");
-    return (
-      <ResponsiveContainer width="100%" height={height}>
-        <BarChart data={output.data} margin={{ top: 8, right: 24, bottom: 24, left: 16 }}>
-          {hasRating && overlayVisible && (
-            <ReferenceLine y={2.29} stroke="#F59E0B" strokeDasharray="4 4" label={{ value: "City avg 2.29", position: "right", fill: "#F59E0B", fontSize: 10 }} />
-          )}
-          <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fontSize: 10, ...MONO, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
-          <Tooltip formatter={(v) => [typeof v === "number" ? v.toLocaleString() : v, output.metricLabel]} contentStyle={{ borderRadius: 8, fontSize: 11, ...MONO }} />
-          <Bar dataKey="value" radius={[5, 5, 0, 0]}>
-            {output.data.map((d, i) => <Cell key={i} fill={d.color ?? "#2D6A4F"} />)}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    );
-  }
-
-  if (output.type === "donut") {
-    return (
-      <ResponsiveContainer width="100%" height={height}>
-        <PieChart>
-          <Pie data={output.data} cx="50%" cy="50%" innerRadius={height * 0.2} outerRadius={height * 0.35} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-            {output.data.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-          </Pie>
-          <Tooltip formatter={(v) => [v.toLocaleString(), "Resources"]} contentStyle={{ borderRadius: 8, fontSize: 11, ...MONO }} />
-          <Legend formatter={(v) => <span style={{ fontSize: 11, color: "#374151" }}>{v}</span>} />
-        </PieChart>
-      </ResponsiveContainer>
-    );
-  }
-
-  if (output.type === "table-only") {
-    return (
-      <div style={{ overflowX: "auto", fontSize: 11, ...MONO }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ background: "#F9FAFB" }}>
-              {(output.tableHeaders ?? []).map((h) => (
-                <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, color: "#6B7280", borderBottom: "1px solid #E5E7EB" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {(output.tableRows ?? []).map((row, i) => (
-              <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#F9FAFB" }}>
-                {row.map((cell, j) => (
-                  <td key={j} style={{ padding: "8px 12px", color: "#374151", borderBottom: "1px solid #F3F4F6" }}>{cell}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
-  if (output.type === "scatter") {
-    const useOverlay = overlayVisible;
-    return (
-      <div style={{ position: "relative" }}>
-        <ResponsiveContainer width="100%" height={height}>
-          <ScatterChart margin={{ top: 16, right: 16, bottom: 24, left: 0 }}>
-            <XAxis type="number" dataKey="x" domain={[0, 45]} tick={{ fontSize: 10, fill: "#9CA3AF", ...MONO }} axisLine={false} tickLine={false} />
-            <YAxis type="number" dataKey="y" domain={[1.5, 3.5]} tick={{ fontSize: 10, fill: "#9CA3AF", ...MONO }} axisLine={false} tickLine={false} />
-            <ZAxis range={[20, 20]} />
-            <Tooltip content={<ScatterTooltip />} cursor={{ strokeDasharray: "3 3" }} />
-            <Scatter data={output.bgData} shape={useOverlay ? <ScatterDotByUnderserved r={4} /> : <BgDot />} name="Network" />
-            <Scatter data={output.topData} shape={useOverlay ? <ScatterDotByUnderserved r={6} /> : <HaloDot />} name="Top impact" />
-          </ScatterChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  return null;
-}
-
 // ── Chart card component ──────────────────────────────────────────────────────
 
-function ChartCard({ chart, index, total, onMove, onRemove, onDuplicate, onCopyData, onToggleOverlay, onToggleExpanded, govData: govDataProp }) {
+function ChartCard({ chart, index, total, onMove, onRemove, onDuplicate, onCopyData, onToggleOverlay, onToggleExpanded, govData: govDataProp, zipDemographics }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const output = chart.output;
   const firstSentence = chart.aiInsight
     ? ((chart.aiInsight.match(/^[^.!?]+[.!?]?/) ?? [chart.aiInsight])[0] || "").trim()
     : "";
@@ -647,8 +547,10 @@ function ChartCard({ chart, index, total, onMove, onRemove, onDuplicate, onCopyD
       {/* Header: title + controls */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{output?.title ?? "Chart"}</div>
-          <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2, ...MONO }}>{output?.subtitle ?? ""}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{chart.title ?? "Chart"}</div>
+          <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2, ...MONO }}>
+             {VARIABLE_MAP[chart.xVar]?.label} {chart.yVar ? ` vs ${VARIABLE_MAP[chart.yVar]?.label}` : ""}
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
           <button type="button" onClick={() => onMove("up")} disabled={index === 0} aria-label="Move up" style={{ padding: "6px 8px", border: "1px solid #E5E7EB", borderRadius: 6, background: "#fff", cursor: index === 0 ? "not-allowed" : "pointer", opacity: index === 0 ? 0.5 : 1 }}>↑</button>
@@ -671,7 +573,7 @@ function ChartCard({ chart, index, total, onMove, onRemove, onDuplicate, onCopyD
 
       {/* Chart area 320px */}
       <div style={{ minHeight: 320 }}>
-        {output && renderChart(output, chart.overlayVisible, 320)}
+        {renderChartContent(chart, zipDemographics)}
       </div>
 
       {/* AI insight */}
@@ -699,11 +601,6 @@ function ChartCard({ chart, index, total, onMove, onRemove, onDuplicate, onCopyD
             </div>
           </>
         ) : null}
-        {/* Overlay toggle */}
-        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, cursor: "pointer", fontSize: 11, color: "#6B7280" }}>
-          <input type="checkbox" checked={chart.overlayVisible} onChange={() => onToggleOverlay()} style={{ accentColor: "#2D6A4F" }} />
-          {chart.overlayVisible ? "● Govt overlay on [hide]" : "+ Show govt overlay"}
-        </label>
       </div>
     </div>
   );
@@ -713,55 +610,75 @@ function ChartCard({ chart, index, total, onMove, onRemove, onDuplicate, onCopyD
 
 export default function VisualizationBuilder({ govData: govDataProp, donorData: donorDataProp }) {
   const govData = govDataProp ?? defaultGovData;
-  const donorData = donorDataProp ?? { boroughImpact: [], topImpactResources: [], backgroundResources: [] };
+  const zipDemographics = govData?.zipDemographics ?? [];
   const [charts, setCharts] = useState([]);
-  const [chartType, setChartType] = useState("bar");
-  const [dimension, setDimension] = useState("boroughs");
-  const [metric, setMetric] = useState("avg-rating");
-  const [boroughFilter, setBoroughFilter] = useState(new Set());
-  const [povertyFilter, setPovertyFilter] = useState("all");
-  const [minSubs, setMinSubs] = useState(0);
-  const [statusFilter, setStatusFilter] = useState("all");
+  
+  // New state for 1 or 2 variables
+  const [xVar, setXVar] = useState("");
+  const [yVar, setYVar] = useState(null); // null means "None" selected
+  const [chartType, setChartType] = useState("");
+  
   const [reportModalOpen, setReportModalOpen] = useState(false);
 
-  const currentFilters = useMemo(
-    () => ({
-      boroughs: Array.from(boroughFilter),
-      poverty: povertyFilter,
-      minSubs,
-      status: statusFilter,
-    }),
-    [boroughFilter, povertyFilter, minSubs, statusFilter]
-  );
+  // Group variables for select
+  const groupedVars = useMemo(() => {
+    const groups = {};
+    VARIABLES.forEach(v => {
+      if (!groups[v.group]) groups[v.group] = [];
+      groups[v.group].push(v);
+    });
+    return groups;
+  }, []);
+
+  // Determine available chart types based on whether we have 1 or 2 vars
+  const availableChartTypes = useMemo(() => {
+    return yVar ? CHART_TYPES_2VAR : CHART_TYPES_1VAR;
+  }, [yVar]);
+
+  // Reset chart type if invalid when switching modes
+  // (e.g. going from 2 vars to 1 var while "scatter" was selected)
+  // This effect runs when yVar changes to ensure chartType is valid
+  useMemo(() => {
+    const validKeys = availableChartTypes.map(c => c.key);
+    if (chartType && !validKeys.includes(chartType)) {
+      setChartType(availableChartTypes[0].key);
+    }
+  }, [yVar, availableChartTypes, chartType]);
 
   const addChart = useCallback(
     (configOverride) => {
-      const ct = configOverride?.chartType ?? chartType;
-      const dim = configOverride?.dimension ?? dimension;
-      const met = configOverride?.metric ?? metric;
-      const output = computeChartOutput(ct, dim, met, currentFilters, donorData, govData);
+      // Use override or current state
+      const finalX = configOverride?.xVar ?? xVar;
+      const finalY = configOverride?.yVar !== undefined ? configOverride.yVar : yVar;
+      const finalType = configOverride?.chartType ?? chartType;
+
+      if (!finalX || !finalType) return;
+
       const newChart = {
         id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
-        chartType: ct,
-        show: dim,
-        metric: met,
-        filters: { ...currentFilters },
-        output,
-        data: output.data ?? output.tableRows ?? [],
+        xVar: finalX,
+        yVar: finalY,
+        chartType: finalType,
+        title: autoTitle({ xVar: finalX, yVar: finalY, chartType: finalType }),
         aiInsight: null,
         aiLoading: true,
         overlayVisible: false,
         expanded: false,
       };
+      
       setCharts((prev) => [...prev, newChart]);
 
-      generateInsight({ chartType: ct, show: dim, metric: met }, output).then((insight) => {
+      // Generate AI insight
+      // Note: we don't compute output here anymore, renderChartContent does it on fly
+      // but we might need some data summary for AI. 
+      // For now, passing null as output to generateInsight and letting it use defaults or we can pass a summary.
+      generateInsight(newChart, null, zipDemographics).then((insight) => {
         setCharts((prev) =>
           prev.map((c) => (c.id === newChart.id ? { ...c, aiInsight: insight, aiLoading: false } : c))
         );
       });
     },
-    [chartType, dimension, metric, currentFilters, govData, donorData]
+    [xVar, yVar, chartType, zipDemographics]
   );
 
   const removeChart = useCallback((id) => {
@@ -790,17 +707,8 @@ export default function VisualizationBuilder({ govData: govDataProp, donorData: 
   }, []);
 
   const duplicateChart = useCallback((chart) => {
-    addChart({ chartType: chart.chartType, dimension: chart.show, metric: chart.metric });
+    addChart({ xVar: chart.xVar, yVar: chart.yVar, chartType: chart.chartType });
   }, [addChart]);
-
-  const toggleBorough = (b) => {
-    setBoroughFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(b)) next.delete(b);
-      else next.add(b);
-      return next;
-    });
-  };
 
   return (
     <div style={{ display: "flex", gap: 0, alignItems: "stretch", minHeight: "60vh" }}>
@@ -817,96 +725,106 @@ export default function VisualizationBuilder({ govData: govDataProp, donorData: 
           overflowY: "auto",
         }}
       >
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", ...MONO }}>CHART_TYPE</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-          {CHART_TYPES.map((ct) => (
-            <button
-              key={ct.id}
-              onClick={() => setChartType(ct.id)}
-              style={{
-                padding: "8px 6px",
-                borderRadius: 8,
-                border: `2px solid ${chartType === ct.id ? "#2D6A4F" : "#E5E7EB"}`,
-                background: chartType === ct.id ? "#F0FDF4" : "#FAFAFA",
-                color: chartType === ct.id ? "#2D6A4F" : "#374151",
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 600,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 3,
-              }}
-            >
-              <span style={{ fontSize: 16 }}>{ct.icon}</span>
-              {ct.label}
-            </button>
-          ))}
-        </div>
-
+        {/* Row 1: Primary variable */}
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", marginBottom: 8, ...MONO }}>SHOW</div>
-          <select value={dimension} onChange={(e) => setDimension(e.target.value)} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", background: "#fff", fontSize: 12, color: "#374151", ...MONO }}>
-            {DIMENSION_OPTIONS.map((d) => (
-              <option key={d.value} value={d.value}>{d.label}</option>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", marginBottom: 8, ...MONO }}>MEASURE</div>
+          <select 
+            value={xVar} 
+            onChange={(e) => {
+              setXVar(e.target.value);
+              // Auto-select first available type if none selected
+              if (!chartType) setChartType(availableChartTypes[0].key);
+            }} 
+            style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", background: "#fff", fontSize: 12, color: "#374151", ...MONO }}
+          >
+            <option value="">Select a variable...</option>
+            {Object.entries(groupedVars).map(([group, vars]) => (
+              <optgroup key={group} label={group}>
+                {vars.map(v => (
+                  <option key={v.key} value={v.key}>{v.label}</option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>
 
+        {/* Row 2: Secondary variable */}
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", marginBottom: 8, ...MONO }}>MEASURED_BY</div>
-          <select value={metric} onChange={(e) => setMetric(e.target.value)} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", background: "#fff", fontSize: 12, color: "#374151", ...MONO }}>
-            {METRIC_OPTIONS.map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", marginBottom: 8, ...MONO }}>COMPARE WITH (OPTIONAL)</div>
+          <select 
+            value={yVar ?? ""} 
+            onChange={(e) => {
+              const val = e.target.value === "" ? null : e.target.value;
+              setYVar(val);
+              // When switching mode, chartType might become invalid, updated in useMemo above
+            }} 
+            style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", background: "#fff", fontSize: 12, color: "#374151", ...MONO }}
+          >
+            <option value="">None — single variable chart</option>
+            {Object.entries(groupedVars).map(([group, vars]) => (
+              <optgroup key={group} label={group}>
+                {vars.map(v => (
+                  <option key={v.key} value={v.key}>{v.label}</option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>
 
+        {/* Row 3: Chart type */}
+        {xVar && (
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", marginBottom: 8, ...MONO }}>CHART TYPE</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              {availableChartTypes.map((ct) => (
+                <button
+                  key={ct.key}
+                  onClick={() => setChartType(ct.key)}
+                  title={ct.desc}
+                  style={{
+                    padding: "8px 6px",
+                    borderRadius: 8,
+                    border: `2px solid ${chartType === ct.key ? "#2D6A4F" : "#E5E7EB"}`,
+                    background: chartType === ct.key ? "#F0FDF4" : "#FAFAFA",
+                    color: chartType === ct.key ? "#2D6A4F" : "#374151",
+                    cursor: "pointer",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 3,
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>{ct.icon}</span>
+                  {ct.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Row 4: Add button */}
         <button
           onClick={() => addChart()}
-          style={{ width: "100%", padding: "11px 0", borderRadius: 9, border: "none", background: "#2D6A4F", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+          disabled={!xVar || !chartType}
+          style={{ 
+            width: "100%", padding: "11px 0", borderRadius: 9, border: "none", 
+            background: (!xVar || !chartType) ? "#E5E7EB" : "#2D6A4F", 
+            color: (!xVar || !chartType) ? "#9CA3AF" : "#fff", 
+            fontSize: 13, fontWeight: 700, 
+            cursor: (!xVar || !chartType) ? "not-allowed" : "pointer" 
+          }}
         >
-          Add to canvas
+          Add chart
         </button>
-        <div style={{ fontSize: 11, color: "#9CA3AF", textAlign: "center", ...MONO }}>Live data · 1,976 resources</div>
+        
+        <div style={{ fontSize: 11, color: "#9CA3AF", textAlign: "center", ...MONO }}>
+          {yVar ? "Will compare 2 variables across NYC ZIPs" : "Will show 1 variable across NYC ZIPs"}
+        </div>
 
-        {/* Filters */}
-        <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 14 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginBottom: 12, ...MONO }}>Filters</div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", marginBottom: 6, ...MONO }}>BOROUGH</div>
-          {["All boroughs", ...BOROUGHS].map((b) => {
-            const isAll = b === "All boroughs";
-            const checked = isAll ? boroughFilter.size === 0 : boroughFilter.has(b);
-            return (
-              <label key={b} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, cursor: "pointer", fontSize: 12, color: "#374151" }}>
-                <input type="checkbox" checked={checked} onChange={() => (isAll ? setBoroughFilter(new Set()) : toggleBorough(b))} style={{ accentColor: "#2D6A4F" }} />
-                {b}
-              </label>
-            );
-          })}
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", marginTop: 12, marginBottom: 6, ...MONO }}>POVERTY_LEVEL</div>
-          {[{ value: "all", label: "All levels" }, { value: "high", label: "High (>30%)" }, { value: "medium", label: "Medium (15–30%)" }, { value: "low", label: "Low (<15%)" }].map((opt) => (
-            <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, cursor: "pointer", fontSize: 12, color: "#374151" }}>
-              <input type="radio" name="poverty" value={opt.value} checked={povertyFilter === opt.value} onChange={() => setPovertyFilter(opt.value)} style={{ accentColor: "#2D6A4F" }} />
-              {opt.label}
-            </label>
-          ))}
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", marginTop: 12, marginBottom: 6, ...MONO }}>STATUS</div>
-          {[{ value: "all", label: "All" }, { value: "published", label: "Published only" }, { value: "unavailable", label: "Unavailable only" }].map((opt) => (
-            <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, cursor: "pointer", fontSize: 12, color: "#374151" }}>
-              <input type="radio" name="status" value={opt.value} checked={statusFilter === opt.value} onChange={() => setStatusFilter(opt.value)} style={{ accentColor: "#2D6A4F" }} />
-              {opt.label}
-            </label>
-          ))}
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", marginTop: 12, marginBottom: 6, ...MONO }}>MIN_SUBSCRIBERS</div>
-          <div style={{ fontSize: 11, color: "#374151", marginBottom: 4, ...MONO }}>{minSubs}</div>
-          <input type="range" min={0} max={400} step={10} value={minSubs} onChange={(e) => setMinSubs(Number(e.target.value))} style={{ width: "100%", accentColor: "#2D6A4F" }} />
-          <button
-            onClick={() => { setBoroughFilter(new Set()); setPovertyFilter("all"); setMinSubs(0); setStatusFilter("all"); }}
-            style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", background: "#fff", fontSize: 12, color: "#6B7280", cursor: "pointer" }}
-          >
-            Reset filters
-          </button>
+        <div style={{ fontSize: 11, color: "#9CA3AF", textAlign: "center", marginTop: 8, ...MONO }}>
+          Live data · {zipDemographics.length} ZIP codes
         </div>
       </div>
 
@@ -916,7 +834,9 @@ export default function VisualizationBuilder({ govData: govDataProp, donorData: 
           /* Empty state */
           <div style={{ display: "flex", gap: 24, alignItems: "center", justifyContent: "center", minHeight: 380, flexWrap: "wrap" }}>
             <button
-              onClick={() => addChart()}
+              onClick={() => {
+                // Focus sidebar (dummy action, just visual cue)
+              }}
               style={{
                 width: 200,
                 height: 200,
@@ -928,7 +848,7 @@ export default function VisualizationBuilder({ govData: govDataProp, donorData: 
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 12,
-                cursor: "pointer",
+                cursor: "default",
                 color: "#9CA3AF",
                 fontSize: 14,
                 fontWeight: 600,
@@ -936,14 +856,14 @@ export default function VisualizationBuilder({ govData: govDataProp, donorData: 
               }}
             >
               <span style={{ fontSize: 48 }}>+</span>
-              Add first chart…
+              Use sidebar to add charts
             </button>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#6B7280", marginBottom: 4 }}>Quick start</div>
               {QUICK_STARTS.map((q) => (
                 <button
                   key={q.label}
-                  onClick={() => addChart({ chartType: q.chartType, dimension: q.dimension, metric: q.metric })}
+                  onClick={() => addChart(q)}
                   style={{
                     padding: "10px 16px",
                     borderRadius: 10,
@@ -977,6 +897,7 @@ export default function VisualizationBuilder({ govData: govDataProp, donorData: 
                 onToggleOverlay={() => toggleOverlay(chart.id)}
                 onToggleExpanded={() => toggleExpanded(chart.id)}
                 govData={govData}
+                zipDemographics={zipDemographics}
               />
             ))}
           </div>
@@ -1007,7 +928,7 @@ export default function VisualizationBuilder({ govData: govDataProp, donorData: 
 
       {/* Report modal */}
       {reportModalOpen && (
-        <ReportModal charts={charts} onClose={() => setReportModalOpen(false)} govData={govData} />
+        <ReportModal charts={charts} onClose={() => setReportModalOpen(false)} govData={govData} zipDemographics={zipDemographics} />
       )}
 
       <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
@@ -1017,7 +938,7 @@ export default function VisualizationBuilder({ govData: govDataProp, donorData: 
 
 // ── Report modal ──────────────────────────────────────────────────────────────
 
-function ReportModal({ charts, onClose, govData: govDataProp }) {
+function ReportModal({ charts, onClose, govData: govDataProp, zipDemographics }) {
   return (
     <>
       <div
@@ -1061,8 +982,8 @@ function ReportModal({ charts, onClose, govData: govDataProp }) {
 
         {charts.map((chart, i) => (
           <div key={chart.id} style={{ marginBottom: 28, paddingBottom: 28, borderBottom: i < charts.length - 1 ? "1px solid #E5E7EB" : "none" }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 8 }}>{chart.output?.title ?? "Chart"}</div>
-            <div style={{ height: 200 }}>{chart.output && renderChart(chart.output, chart.overlayVisible, 200)}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 8 }}>{chart.title ?? "Chart"}</div>
+            <div style={{ height: 200 }}>{renderChartContent(chart, zipDemographics)}</div>
             {chart.aiInsight && <p style={{ fontSize: 12, color: "#374151", lineHeight: 1.7, marginTop: 12 }}>{chart.aiInsight}</p>}
             <ul style={{ fontSize: 11, color: "#6B7280", marginTop: 8, paddingLeft: 18 }}>
               {getGovContext(govDataProp).map((line, j) => <li key={j}>{line}</li>)}
