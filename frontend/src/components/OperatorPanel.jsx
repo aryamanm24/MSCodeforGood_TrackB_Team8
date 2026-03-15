@@ -1,14 +1,15 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip,
 } from "recharts";
-import { demoPantries, manhattanBenchmarks, nearbyPantries } from "@/lib/mockData";
 import Footer from "./Footer";
 
 const MiniMap = dynamic(() => import("./MiniMap"), { ssr: false });
+
+const API = process.env.NEXT_PUBLIC_API_URL;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -38,54 +39,65 @@ function confidenceColor(c) {
 
 function topPercentLabel(percentile) {
   const pct = 100 - percentile;
-  if (pct <= 0) return "Highest rated in Manhattan";
-  if (pct <= 1) return "Top 1% in Manhattan";
-  return `Top ${pct}% in Manhattan`;
+  if (pct <= 0) return "Highest rated in NYC";
+  if (pct <= 1) return "Top 1% in NYC";
+  return `Top ${pct}% in NYC`;
 }
 
-// Build the 5-axis radar data for a pantry vs Manhattan averages
-function buildRadarData(pantry) {
-  const avg = manhattanBenchmarks.radarAvg;
+function computeLocalCompleteness(resource) {
+  const checks = [
+    !!resource.phone,
+    !!resource.website,
+    !!resource.description,
+    resource.hasShifts,
+    resource.hasOccurrences,
+    resource.tags && resource.tags.length > 0,
+  ];
+  return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+}
+
+function buildRadarData(resource, benchmarks) {
+  const avg = benchmarks?.radarAvg ?? { rating: 46, reviews: 14, subscribers: 14, confidence: 82, schedule: 78 };
   return [
     {
       axis: "Rating",
-      you: Math.round((pantry.rating / 5) * 100),
+      you: Math.round((resource.rating / 5) * 100),
       avg: avg.rating,
     },
     {
       axis: "Reviews",
-      you: Math.min(Math.round((pantry.reviewCount / 50) * 100), 100),
+      you: Math.min(Math.round((resource.reviewCount / 50) * 100), 100),
       avg: avg.reviews,
     },
     {
       axis: "Subscribers",
-      you: Math.min(Math.round((pantry.subscriptionCount / 200) * 100), 100),
+      you: Math.min(Math.round((resource.subscriptionCount / 200) * 100), 100),
       avg: avg.subscribers,
     },
     {
-      axis: "Completeness",
-      you: Math.round(pantry.confidence * 100),
-      avg: avg.completeness,
+      axis: "Confidence",
+      you: Math.round(resource.confidence * 100),
+      avg: avg.confidence,
     },
     {
       axis: "Schedule",
-      you: (pantry.hasShifts ? 50 : 0) + (pantry.hasOccurrences ? 50 : 0),
+      you: (resource.hasShifts ? 50 : 0) + (resource.hasOccurrences ? 50 : 0),
       avg: avg.schedule,
     },
   ];
 }
 
-// ── Card 0 – Radar chart (sits beside the mini-map) ──────────────────────────
+// ── Card 0 – Radar chart ─────────────────────────────────────────────────────
 
-function RadarCard({ pantry }) {
-  const radarData = buildRadarData(pantry);
+function RadarCard({ resource, benchmarks }) {
+  const radarData = buildRadarData(resource, benchmarks);
   const aboveAvg = radarData.filter((d) => d.you > d.avg).length;
 
   let insight;
-  if (aboveAvg >= 4) insight = "You're outperforming most Manhattan pantries across all key dimensions — keep it up.";
-  else if (aboveAvg >= 3) insight = "You're performing above the Manhattan average on most metrics.";
-  else if (aboveAvg <= 1) insight = "Several metrics need attention compared to similar Manhattan pantries.";
-  else insight = "You're performing close to the Manhattan average — there's room to grow.";
+  if (aboveAvg >= 4) insight = "You're outperforming most NYC resources across all key dimensions — keep it up.";
+  else if (aboveAvg >= 3) insight = "You're performing above the NYC average on most metrics.";
+  else if (aboveAvg <= 1) insight = "Several metrics need attention compared to similar NYC resources.";
+  else insight = "You're performing close to the NYC average — there's room to grow.";
 
   return (
     <div
@@ -101,10 +113,10 @@ function RadarCard({ pantry }) {
     >
       <div style={{ marginBottom: 4 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>
-          How you compare to Manhattan
+          How you compare to NYC
         </div>
         <div style={{ fontSize: 11, color: "#6B7280" }}>
-          {manhattanBenchmarks.ratedPantries} rated pantries · real data
+          {benchmarks?.ratedCount ?? "—"} rated resources · live data
         </div>
       </div>
 
@@ -126,7 +138,7 @@ function RadarCard({ pantry }) {
               strokeWidth={2}
             />
             <Radar
-              name="Manhattan avg"
+              name="NYC avg"
               dataKey="avg"
               stroke="#9CA3AF"
               fill="#9CA3AF"
@@ -142,7 +154,6 @@ function RadarCard({ pantry }) {
         </ResponsiveContainer>
       </div>
 
-      {/* Manual legend */}
       <div style={{ display: "flex", gap: 14, justifyContent: "center", marginBottom: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#2D6A4F" }}>
           <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "#2D6A4F", opacity: 0.7 }} />
@@ -150,11 +161,10 @@ function RadarCard({ pantry }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#6B7280" }}>
           <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "#9CA3AF", opacity: 0.5 }} />
-          Manhattan avg
+          NYC avg
         </div>
       </div>
 
-      {/* Insight */}
       <div
         style={{
           fontSize: 11,
@@ -174,67 +184,80 @@ function RadarCard({ pantry }) {
 
 // ── Card 1 – Neighborhood comparison ─────────────────────────────────────────
 
-function NeighborhoodCard({ pantry }) {
-  const pantryInNearby = nearbyPantries.find((np) => np.name === pantry.name);
-  const myDistance = pantryInNearby ? pantryInNearby.distance : 0;
-  const neighborRows = nearbyPantries.filter((np) => np.name !== pantry.name);
+function NeighborhoodCard({ resource, neighbors, loadingNeighbors }) {
+  const neighborRows = neighbors.filter((n) => n.name !== resource.name);
 
-  const maxNeighborRating = Math.max(...neighborRows.map((n) => n.rating));
-  const avgNeighborRating =
-    neighborRows.reduce((s, n) => s + n.rating, 0) / neighborRows.length;
-  const higherCount = neighborRows.filter((n) => n.rating > pantry.rating).length;
+  if (loadingNeighbors) {
+    return (
+      <div style={{ background: "#fff", borderRadius: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", padding: 24, marginBottom: 20, textAlign: "center", color: "#6B7280", fontSize: 13 }}>
+        Loading neighborhood data…
+      </div>
+    );
+  }
+
+  if (neighborRows.length === 0) {
+    return (
+      <div style={{ background: "#fff", borderRadius: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", padding: 24, marginBottom: 20 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#111827", margin: 0 }}>Your standing in the neighborhood</h3>
+        <p style={{ fontSize: 13, color: "#6B7280", margin: "8px 0 0" }}>
+          No other published resources found in ZIP {resource.zipCode}.
+        </p>
+      </div>
+    );
+  }
+
+  const ratedNeighbors = neighborRows.filter((n) => n.rating > 0);
+  const maxNeighborRating = ratedNeighbors.length ? Math.max(...ratedNeighbors.map((n) => n.rating)) : 0;
+  const avgNeighborRating = ratedNeighbors.length
+    ? ratedNeighbors.reduce((s, n) => s + n.rating, 0) / ratedNeighbors.length
+    : 0;
+  const higherCount = ratedNeighbors.filter((n) => n.rating > resource.rating).length;
 
   let insight;
-  if (pantry.rating > maxNeighborRating) {
-    insight = `You have the highest rating among pantries within 1 mile — your ${pantry.reviewCount} reviews put you in the top ${100 - pantry.reviewPercentile}% of Manhattan.`;
-  } else if (pantry.rating < avgNeighborRating) {
-    insight = `Your rating is below the neighborhood average. ${higherCount} nearby ${higherCount === 1 ? "pantry is" : "pantries are"} rated higher.`;
+  if (resource.rating > maxNeighborRating && ratedNeighbors.length > 0) {
+    insight = `You have the highest rating among resources in ZIP ${resource.zipCode} — your ${resource.reviewCount} reviews make you a standout.`;
+  } else if (resource.rating < avgNeighborRating) {
+    insight = `Your rating is below the neighborhood average. ${higherCount} nearby ${higherCount === 1 ? "resource is" : "resources are"} rated higher.`;
   } else {
-    insight = `Your rating is above average for this neighborhood. ${higherCount} nearby ${higherCount === 1 ? "pantry is" : "pantries are"} rated higher.`;
+    insight = `Your rating is above average for this neighborhood. ${higherCount} nearby ${higherCount === 1 ? "resource is" : "resources are"} rated higher.`;
   }
 
   const thStyle = {
-    fontSize: 11,
-    fontWeight: 600,
-    color: "#6B7280",
-    textTransform: "uppercase",
-    letterSpacing: "0.06em",
-    padding: "0 8px 8px",
-    borderBottom: "1px solid #E5E7EB",
-    whiteSpace: "nowrap",
+    fontSize: 11, fontWeight: 600, color: "#6B7280",
+    textTransform: "uppercase", letterSpacing: "0.06em",
+    padding: "0 8px 8px", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap",
   };
-
   const COL = {
-    name:    { flex: "1 1 180px", minWidth: 140 },
-    dist:    { flex: "0 0 72px" },
-    rating:  { flex: "0 0 64px" },
+    name: { flex: "1 1 180px", minWidth: 140 },
+    dist: { flex: "0 0 72px" },
+    rating: { flex: "0 0 64px" },
     reviews: { flex: "0 0 68px" },
-    subs:    { flex: "0 0 88px" },
-    conf:    { flex: "0 0 96px" },
+    subs: { flex: "0 0 88px" },
+    conf: { flex: "0 0 96px" },
   };
 
   function Row({ entry, isYou }) {
     return (
       <div
         style={{
-          display: "flex",
-          alignItems: "center",
+          display: "flex", alignItems: "center",
           background: isYou ? "#F0FDF4" : undefined,
           borderLeft: isYou ? "3px solid #2D6A4F" : "3px solid transparent",
-          borderRadius: 6,
-          marginBottom: 2,
+          borderRadius: 6, marginBottom: 2,
         }}
       >
         <div style={{ flex: COL.name.flex, minWidth: COL.name.minWidth, padding: "9px 8px", fontSize: 13, fontWeight: isYou ? 700 : 400, color: isYou ? "#14532D" : "#111827" }}>
           {isYou ? `${entry.name} (You)` : entry.name}
         </div>
         <div style={{ flex: COL.dist.flex, padding: "9px 8px", fontSize: 13, color: "#6B7280", textAlign: "right", whiteSpace: "nowrap" }}>
-          {isYou && myDistance === 0 ? "—" : `${(isYou ? myDistance : entry.distance).toFixed(2)} mi`}
+          {isYou ? "—" : entry.distance > 0 ? `${entry.distance.toFixed(2)} mi` : "—"}
         </div>
         <div style={{ flex: COL.rating.flex, padding: "9px 8px", textAlign: "right" }}>
-          <span style={{ background: tableRatingBg(entry.rating), color: tableRatingColor(entry.rating), borderRadius: 4, padding: "2px 7px", fontSize: 12, fontWeight: 600 }}>
-            {entry.rating.toFixed(1)}
-          </span>
+          {entry.rating > 0 ? (
+            <span style={{ background: tableRatingBg(entry.rating), color: tableRatingColor(entry.rating), borderRadius: 4, padding: "2px 7px", fontSize: 12, fontWeight: 600 }}>
+              {entry.rating.toFixed(1)}
+            </span>
+          ) : <span style={{ fontSize: 12, color: "#9CA3AF" }}>—</span>}
         </div>
         <div style={{ flex: COL.reviews.flex, padding: "9px 8px", fontSize: 13, color: "#374151", textAlign: "right" }}>
           {entry.reviewCount}
@@ -256,19 +279,18 @@ function NeighborhoodCard({ pantry }) {
           Your standing in the neighborhood
         </h3>
         <p style={{ fontSize: 12, color: "#6B7280", margin: "4px 0 0" }}>
-          Compared to {neighborRows.length} pantries within 1 mile · real data
+          Compared to {neighborRows.length} resources in ZIP {resource.zipCode} · live data
         </p>
       </div>
 
-      {/* Header row */}
       <div style={{ display: "flex", padding: "0 0 0 3px" }}>
         {[
-          { label: "Pantry", ...COL.name },
+          { label: "Resource", ...COL.name },
           { label: "Distance", ...COL.dist, textAlign: "right" },
           { label: "Rating", ...COL.rating, textAlign: "right" },
           { label: "Reviews", ...COL.reviews, textAlign: "right" },
           { label: "Subscribers", ...COL.subs, textAlign: "right" },
-          { label: "Completeness", ...COL.conf, textAlign: "right" },
+          { label: "Confidence", ...COL.conf, textAlign: "right" },
         ].map((c) => (
           <div key={c.label} style={{ ...thStyle, flex: c.flex, textAlign: c.textAlign, minWidth: c.minWidth }}>
             {c.label}
@@ -276,9 +298,9 @@ function NeighborhoodCard({ pantry }) {
         ))}
       </div>
 
-      <Row entry={{ ...pantry }} isYou />
+      <Row entry={{ ...resource, distance: 0 }} isYou />
       {neighborRows.map((np, i) => (
-        <div key={np.name} style={{ background: i % 2 === 0 ? "#F9FAFB" : "#fff", borderRadius: 6, marginBottom: 2 }}>
+        <div key={np.id ?? np.name} style={{ background: i % 2 === 0 ? "#F9FAFB" : "#fff", borderRadius: 6, marginBottom: 2 }}>
           <Row entry={np} isYou={false} />
         </div>
       ))}
@@ -290,28 +312,27 @@ function NeighborhoodCard({ pantry }) {
   );
 }
 
-// ── Card 2 – Listing health ───────────────────────────────────────────────────
+// ── Card 2 – Listing health ──────────────────────────────────────────────────
 
-function ListingHealthCard({ pantry }) {
-  const pct = Math.round(pantry.confidence * 100);
-  const pctColor = pct >= 80 ? "#166534" : pct >= 60 ? "#92400E" : "#991B1B";
-  const barColor = pct >= 80 ? "#2D6A4F" : pct >= 60 ? "#D97706" : "#DC2626";
-
-  const missingWebsite = !pantry.website;
-  const missingShifts = !pantry.hasShifts;
-  let hintText;
-  if (missingWebsite && missingShifts) hintText = "Add hours and website to reach 100%";
-  else if (missingWebsite) hintText = "Add a website to reach 100%";
-  else if (missingShifts) hintText = "Add your hours to reach 100%";
-  else hintText = "Your listing is complete";
+function ListingHealthCard({ resource }) {
+  const completeness = computeLocalCompleteness(resource);
+  const pctColor = completeness >= 80 ? "#166534" : completeness >= 60 ? "#92400E" : "#991B1B";
+  const barColor = completeness >= 80 ? "#2D6A4F" : completeness >= 60 ? "#D97706" : "#DC2626";
 
   const checks = [
-    { label: "Phone number", ok: !!pantry.phone },
-    { label: "Schedule configured", ok: pantry.hasShifts },
-    { label: "Recurring hours set", ok: pantry.hasOccurrences },
-    { label: "Website added", ok: !!pantry.website },
-    { label: "Tags / requirements listed", ok: pantry.tags && pantry.tags.length > 0 },
+    { label: "Phone number", ok: !!resource.phone },
+    { label: "Schedule configured", ok: resource.hasShifts },
+    { label: "Recurring hours set", ok: resource.hasOccurrences },
+    { label: "Website added", ok: !!resource.website },
+    { label: "Tags / requirements listed", ok: resource.tags && resource.tags.length > 0 },
+    { label: "Description provided", ok: !!resource.description },
   ];
+  const missing = checks.filter((c) => !c.ok).map((c) => c.label.toLowerCase());
+
+  let hintText;
+  if (missing.length === 0) hintText = "Your listing is complete";
+  else if (missing.length <= 2) hintText = `Add ${missing.join(" and ")} to reach 100%`;
+  else hintText = `${missing.length} fields still missing — complete them to improve discoverability`;
 
   return (
     <div style={{ background: "#fff", borderRadius: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", padding: 24, marginBottom: 20 }}>
@@ -322,13 +343,13 @@ function ListingHealthCard({ pantry }) {
       <div style={{ display: "flex", gap: 40, flexWrap: "wrap" }}>
         <div style={{ flex: "0 0 200px" }}>
           <div style={{ fontSize: 52, fontWeight: 800, color: pctColor, lineHeight: 1, marginBottom: 4 }}>
-            {pct}%
+            {completeness}%
           </div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 10 }}>
             Listing completeness
           </div>
           <div style={{ height: 8, background: "#E5E7EB", borderRadius: 4, overflow: "hidden", marginBottom: 8 }}>
-            <div style={{ height: "100%", width: `${pct}%`, background: barColor, borderRadius: 4, transition: "width 0.4s ease" }} />
+            <div style={{ height: "100%", width: `${completeness}%`, background: barColor, borderRadius: 4, transition: "width 0.4s ease" }} />
           </div>
           <div style={{ fontSize: 12, color: "#6B7280" }}>{hintText}</div>
         </div>
@@ -349,38 +370,38 @@ function ListingHealthCard({ pantry }) {
         style={{
           display: "inline-flex", alignItems: "center", gap: 6, marginTop: 20,
           padding: "6px 12px", borderRadius: 20,
-          background: pantry.status === "PUBLISHED" ? "#DCFCE7" : "#FEE2E2",
+          background: resource.status === "PUBLISHED" ? "#DCFCE7" : "#FEE2E2",
           fontSize: 13, fontWeight: 600,
-          color: pantry.status === "PUBLISHED" ? "#166534" : "#991B1B",
+          color: resource.status === "PUBLISHED" ? "#166534" : "#991B1B",
         }}
       >
         <span style={{ fontSize: 8 }}>●</span>
-        {pantry.status === "PUBLISHED" ? "Live on LemonTree" : "Hidden from search"}
+        {resource.status === "PUBLISHED" ? "Live on LemonTree" : "Hidden from search"}
       </div>
     </div>
   );
 }
 
-// ── Card 3 – Community reach ──────────────────────────────────────────────────
+// ── Card 3 – Community reach ─────────────────────────────────────────────────
 
-function CommunityReachCard({ pantry }) {
+function CommunityReachCard({ resource, benchmarks }) {
   const stats = [
     {
-      value: pantry.rating.toFixed(1),
+      value: resource.rating > 0 ? resource.rating.toFixed(1) : "—",
       label: "out of 5.0",
-      context: topPercentLabel(pantry.ratingPercentile),
+      context: topPercentLabel(resource.ratingPercentile ?? 50),
       contextColor: "#166534",
     },
     {
-      value: pantry.reviewCount,
+      value: resource.reviewCount,
       label: "visitor reviews",
-      context: `Manhattan median: ${manhattanBenchmarks.medianReviews}`,
+      context: `NYC median: ${benchmarks?.medianReviews ?? "—"}`,
       contextColor: "#6B7280",
     },
     {
-      value: pantry.subscriptionCount,
+      value: resource.subscriptionCount,
       label: "people subscribed",
-      context: `Manhattan median: ${manhattanBenchmarks.medianSubs}`,
+      context: `NYC median: ${benchmarks?.medianSubs ?? "—"}`,
       contextColor: "#6B7280",
     },
   ];
@@ -403,32 +424,79 @@ function CommunityReachCard({ pantry }) {
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Main component ───────────────────────────────────────────────────────────
 
 export default function OperatorPanel() {
   const [selectedIdx, setSelectedIdx] = useState(0);
-  // Start with static data; replaced by live Supabase data once fetched
-  const [pantries, setPantries] = useState(demoPantries);
-  const [dataSource, setDataSource] = useState("static");
+  const [resources, setResources] = useState([]);
+  const [benchmarks, setBenchmarks] = useState(null);
+  const [neighbors, setNeighbors] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingNeighbors, setLoadingNeighbors] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/operator/pantries`)
-      .then((r) => r.json())
-      .then(({ pantries: live, source }) => {
+    fetch(`${API}/api/operator/pantries`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(({ resources: live, benchmarks: bm }) => {
         if (Array.isArray(live) && live.length > 0) {
-          setPantries(live);
-          setDataSource(source ?? "supabase");
+          setResources(live);
+          setBenchmarks(bm ?? null);
+        } else {
+          setError("No resources returned from server");
         }
       })
-      .catch(() => {
-        // Keep static fallback on any network error
-      })
+      .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
 
-  const pantry = pantries[selectedIdx];
-  const badge = ratingBadgeColor(pantry.rating);
+  const fetchNeighborhood = useCallback((resource) => {
+    if (!resource?.zipCode) return;
+    setLoadingNeighbors(true);
+    setNeighbors([]);
+    const params = new URLSearchParams({ zip: resource.zipCode });
+    if (resource.lat) params.set("lat", resource.lat);
+    if (resource.lng) params.set("lng", resource.lng);
+
+    fetch(`${API}/api/operator/neighborhood?${params}`)
+      .then((r) => r.json())
+      .then(({ neighbors: n }) => setNeighbors(n ?? []))
+      .catch(() => setNeighbors([]))
+      .finally(() => setLoadingNeighbors(false));
+  }, []);
+
+  const resource = resources[selectedIdx];
+
+  useEffect(() => {
+    if (resource) fetchNeighborhood(resource);
+  }, [resource, fetchNeighborhood]);
+
+  if (loading) {
+    return (
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+        <div style={{ textAlign: "center", color: "#6B7280" }}>
+          <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Loading resources…</div>
+          <div style={{ fontSize: 13 }}>Fetching live data from Supabase</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !resource) {
+    return (
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+        <div style={{ textAlign: "center", color: "#991B1B" }}>
+          <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Unable to load resources</div>
+          <div style={{ fontSize: 13, color: "#6B7280" }}>{error ?? "No data available"}</div>
+        </div>
+      </div>
+    );
+  }
+
+  const badge = ratingBadgeColor(resource.rating);
 
   return (
     <div
@@ -440,7 +508,7 @@ export default function OperatorPanel() {
         fontFamily: "'DM Sans', system-ui, sans-serif",
       }}
     >
-      {/* §1 – Pantry selector */}
+      {/* Resource selector */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
         <span style={{ fontSize: 13, color: "#6B7280", fontWeight: 500 }}>Viewing:</span>
         <select
@@ -454,54 +522,50 @@ export default function OperatorPanel() {
             boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
           }}
         >
-          {pantries.map((p, i) => (
-            <option key={p.name} value={i}>{p.name}</option>
+          {resources.map((p, i) => (
+            <option key={p.id} value={i}>{p.name}</option>
           ))}
         </select>
-        {/* Live data badge */}
         <span
           style={{
             fontSize: 11, fontWeight: 600,
-            color: dataSource === "supabase" ? "#166534" : "#92400E",
-            background: dataSource === "supabase" ? "#DCFCE7" : "#FEF3C7",
+            color: "#166534",
+            background: "#DCFCE7",
             padding: "3px 8px", borderRadius: 10,
-            opacity: loading ? 0.5 : 1,
-            transition: "opacity 0.3s",
           }}
         >
-          {loading ? "Loading…" : dataSource === "supabase" ? "● Live data" : "● Static data"}
+          ● Live data
         </span>
       </div>
 
-      {/* §2 – Header: name + badge */}
+      {/* Header: name + badge */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 800, color: "#111827", margin: 0 }}>{pantry.name}</h2>
-          <p style={{ fontSize: 13, color: "#6B7280", margin: "3px 0 0" }}>{pantry.address}</p>
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: "#111827", margin: 0 }}>{resource.name}</h2>
+          <p style={{ fontSize: 13, color: "#6B7280", margin: "3px 0 0" }}>{resource.address}</p>
         </div>
         <span style={{ background: badge.bg, color: badge.text, borderRadius: 20, padding: "5px 14px", fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
-          {badge.label} · {pantry.rating.toFixed(1)}
+          {badge.label} · {resource.rating > 0 ? resource.rating.toFixed(1) : "—"}
         </span>
       </div>
 
-      {/* §3 – Visibility status banner */}
-      {pantry.status === "PUBLISHED" ? (
+      {/* Visibility status banner */}
+      {resource.status === "PUBLISHED" ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, padding: "10px 16px", marginBottom: 20, fontSize: 13, color: "#166534" }}>
           <span style={{ fontSize: 9 }}>●</span>
-          Your pantry is live on LemonTree — visible to people searching for food resources in your area.
+          Your resource is live on LemonTree — visible to people searching for food assistance in your area.
         </div>
       ) : (
         <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "10px 16px", marginBottom: 20, fontSize: 13, color: "#991B1B" }}>
           <span>⚠</span>
-          Your pantry is currently hidden from search results. Contact LemonTree to restore your listing.
+          Your resource is currently hidden from search results. Contact LemonTree to restore your listing.
         </div>
       )}
 
-      {/* §4 – Map (left, 40%) + Radar chart (right, 60%) */}
+      {/* Map + Radar chart */}
       <div style={{ display: "flex", gap: 16, marginBottom: 20, alignItems: "stretch" }}>
-        {/* Mini map */}
         <div
-          key={`map-${pantry.name}`}
+          key={`map-${resource.name}`}
           style={{
             flex: "0 0 60%",
             position: "relative",
@@ -512,28 +576,21 @@ export default function OperatorPanel() {
           }}
         >
           <MiniMap
-            lat={pantry.lat}
-            lng={pantry.lng}
-            name={pantry.name}
-            rating={pantry.rating}
-            address={pantry.address}
+            lat={resource.lat}
+            lng={resource.lng}
+            name={resource.name}
+            rating={resource.rating}
+            address={resource.address}
           />
         </div>
-
-        {/* Radar chart */}
         <div style={{ flex: "1 1 35%", minHeight: 260 }}>
-          <RadarCard pantry={pantry} />
+          <RadarCard resource={resource} benchmarks={benchmarks} />
         </div>
       </div>
 
-      {/* Card 1 – Neighborhood comparison */}
-      <NeighborhoodCard pantry={pantry} />
-
-      {/* Card 2 – Listing health */}
-      <ListingHealthCard pantry={pantry} />
-
-      {/* Card 3 – Community reach */}
-      <CommunityReachCard pantry={pantry} />
+      <NeighborhoodCard resource={resource} neighbors={neighbors} loadingNeighbors={loadingNeighbors} />
+      <ListingHealthCard resource={resource} />
+      <CommunityReachCard resource={resource} benchmarks={benchmarks} />
 
       <div style={{ height: 24 }} />
       <Footer />

@@ -774,7 +774,7 @@ function TopNav() {
 
 /* ── Main content (needs useSearchParams — wrapped in Suspense) ──────── */
 
-function ExploreContent() {
+function ExploreContent({ embedded = false }) {
   const router       = useRouter();
   const searchParams = useSearchParams();
 
@@ -786,8 +786,9 @@ function ExploreContent() {
   const [page,             setPage]             = useState(Number(searchParams.get("page")) || 1);
   const [selectedResource, setSelectedResource] = useState(null);
 
-  // Sync filter/page state → URL query string
+  // Sync filter/page state → URL query string (skip when embedded in dashboard tab)
   useEffect(() => {
+    if (embedded) return;
     const params = new URLSearchParams();
     if (filters.type)            params.set("type",         filters.type);
     if (filters.borough)         params.set("borough",      filters.borough);
@@ -807,7 +808,7 @@ function ExploreContent() {
       q ? `/dashboard/explore?${q}` : "/dashboard/explore",
       { scroll: false }
     );
-  }, [filters, page, router]);
+  }, [embedded, filters, page, router]);
 
   // Reset page to 1 whenever a filter changes
   const setFiltersAndReset = useCallback((updater) => {
@@ -953,7 +954,7 @@ function ExploreContent() {
   // ── Main view ──────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col min-h-screen bg-[#f5f3ef]">
-      <TopNav />
+      {!embedded && <TopNav />}
 
       <ExploreFilters
         meta={meta}
@@ -1026,6 +1027,14 @@ function ExploreContent() {
   );
 }
 
+/* ── Wrapper to read embedded from URL (for iframe tab) ────────────────── */
+
+function ExploreWithParams() {
+  const searchParams = useSearchParams();
+  const embedded = searchParams.get("embedded") === "1";
+  return <ExploreContent embedded={embedded} />;
+}
+
 /* ── Page export (Suspense boundary required for useSearchParams) ─────── */
 
 export default function ExplorePage() {
@@ -1033,14 +1042,13 @@ export default function ExplorePage() {
     <Suspense
       fallback={
         <div className="flex flex-col min-h-screen bg-[#f5f3ef]">
-          <TopNav />
           <div className="flex flex-1 items-center justify-center p-8">
             <p className="text-sand-600">Loading…</p>
           </div>
         </div>
       }
     >
-      <ExploreContent />
+      <ExploreWithParams />
     </Suspense>
   );
 }

@@ -2,12 +2,15 @@
 
 import { useState, useRef } from "react";
 
-const STEPS = ["attendance", "experience", "details", "confirm"];
+const STEPS = ["attendance", "experience", "details", "contact", "confirm"];
+const STEPS_WITH_LOCATION = ["location", ...STEPS];
 
 const STEP_LABELS = {
+  location: "Which location did you visit?",
   attendance: "Did you get help?",
   experience: "Rate your visit",
   details: "Share details",
+  contact: "Stay in touch",
   confirm: "Review & submit",
 };
 
@@ -20,8 +23,25 @@ const NON_ATTEND_REASONS = [
   { value: "other", label: "Other reason" },
 ];
 
+const INACCURACY_TYPES = [
+  { value: "hours", label: "Hours" },
+  { value: "address", label: "Address" },
+  { value: "phone", label: "Phone" },
+  { value: "website", label: "Website" },
+  { value: "food_types", label: "Food types" },
+  { value: "other", label: "Other" },
+];
+
 function StarRating({ value, onChange }) {
   const [hovered, setHovered] = useState(0);
+  const getHoverValue = (event, star) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    return x < rect.width / 2 ? star - 0.5 : star;
+  };
+
+  const displayValue = hovered || value;
+
   return (
     <div
       style={{
@@ -35,7 +55,8 @@ function StarRating({ value, onChange }) {
         <button
           key={star}
           type="button"
-          onClick={() => onChange(star)}
+          onClick={(e) => onChange(getHoverValue(e, star))}
+          onMouseMove={(e) => setHovered(getHoverValue(e, star))}
           onMouseEnter={() => setHovered(star)}
           onMouseLeave={() => setHovered(0)}
           style={{
@@ -44,19 +65,32 @@ function StarRating({ value, onChange }) {
             cursor: "pointer",
             padding: 4,
             transition: "transform 0.15s",
-            transform: hovered === star ? "scale(1.2)" : "scale(1)",
+            transform: Math.ceil(displayValue) === star ? "scale(1.2)" : "scale(1)",
           }}
-          aria-label={`${star} star${star > 1 ? "s" : ""}`}
+          aria-label={`${star - 0.5} or ${star} stars`}
         >
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" role="img" aria-hidden="true">
             <path
               d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
-              fill={(hovered || value) >= star ? "#E4A11B" : "none"}
-              stroke={(hovered || value) >= star ? "#E4A11B" : "#c0bdb4"}
+              fill="#fff"
+              stroke="#c0bdb4"
               strokeWidth="1.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
+            {(() => {
+              const fillFraction = Math.max(0, Math.min(1, displayValue - (star - 1)));
+              if (fillFraction <= 0) return null;
+              return (
+                <path
+                  d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
+                  fill="#E4A11B"
+                  style={{
+                    clipPath: `inset(0 ${100 - fillFraction * 100}% 0 0)`,
+                  }}
+                />
+              );
+            })()}
           </svg>
         </button>
       ))}
@@ -64,9 +98,9 @@ function StarRating({ value, onChange }) {
   );
 }
 
-function ProgressBar({ step }) {
-  const idx = STEPS.indexOf(step);
-  const pct = ((idx + 1) / STEPS.length) * 100;
+function ProgressBar({ steps, step }) {
+  const idx = steps.indexOf(step);
+  const pct = idx >= 0 && steps.length ? ((idx + 1) / steps.length) * 100 : 0;
   return (
     <div
       style={{
@@ -96,7 +130,7 @@ function Chip({ label, selected, onClick }) {
       type="button"
       onClick={onClick}
       style={{
-        padding: "10px 16px",
+        padding: "10px 14px",
         borderRadius: 24,
         border: selected ? "2px solid #2E8B6E" : "1.5px solid #d0cdc4",
         background: selected ? "#E1F5EE" : "transparent",
@@ -121,27 +155,29 @@ function BigChoice({ icon, label, sublabel, selected, onClick }) {
       onClick={onClick}
       style={{
         width: "100%",
-        padding: "20px 24px",
+        padding: "16px",
         borderRadius: 16,
         border: selected ? "2px solid #2E8B6E" : "1.5px solid #d0cdc4",
         background: selected ? "#E1F5EE" : "transparent",
         display: "flex",
         alignItems: "center",
-        gap: 16,
+        gap: 12,
         cursor: "pointer",
         textAlign: "left",
         marginBottom: 12,
         transition: "all 0.15s",
+        boxSizing: "border-box",
       }}
     >
-      <span style={{ fontSize: 28 }}>{icon}</span>
-      <div>
+      <span style={{ fontSize: 24, flexShrink: 0 }}>{icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
             fontFamily: "inherit",
             fontSize: 16,
             fontWeight: 500,
             color: selected ? "#085041" : "#2c2c2a",
+            lineHeight: 1.3,
           }}
         >
           {label}
@@ -152,14 +188,15 @@ function BigChoice({ icon, label, sublabel, selected, onClick }) {
               fontFamily: "inherit",
               fontSize: 13,
               color: selected ? "#0F6E56" : "#888780",
-              marginTop: 2,
+              marginTop: 4,
+              lineHeight: 1.4,
             }}
           >
             {sublabel}
           </div>
         )}
       </div>
-      <div style={{ marginLeft: "auto" }}>
+      <div style={{ marginLeft: "auto", flexShrink: 0 }}>
         <div
           style={{
             width: 22,
@@ -200,7 +237,7 @@ function WaitTimePicker({ value, onChange }) {
   ];
   return (
     <div
-      style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}
+      style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}
     >
       {buckets.map((b) => (
         <Chip
@@ -214,24 +251,51 @@ function WaitTimePicker({ value, onChange }) {
   );
 }
 
-const STAR_LABELS = ["", "Poor", "Fair", "Okay", "Good", "Great!"];
+const STAR_LABELS = {
+  0.5: "Very poor",
+  1: "Poor",
+  1.5: "Poor+",
+  2: "Fair",
+  2.5: "Fair+",
+  3: "Okay",
+  3.5: "Okay+",
+  4: "Good",
+  4.5: "Great",
+  5: "Great!",
+};
+
+const getStarLabel = (rating) => STAR_LABELS[rating] || "";
 
 export default function FeedbackForm({
   resourceName = "Food Pantry",
   resourceId = "",
   onSubmit = null,
 }) {
-  const [step, setStep] = useState("attendance");
+  const needLocation = !resourceId;
+  const steps = needLocation ? STEPS_WITH_LOCATION : STEPS;
+  const [step, setStep] = useState(needLocation ? "location" : "attendance");
+  const [selectedResourceId, setSelectedResourceId] = useState(resourceId);
+  const [selectedResourceName, setSelectedResourceName] = useState(resourceName);
+  const [locationStatus, setLocationStatus] = useState("idle"); // idle | getting | ready | error
+  const [locationError, setLocationError] = useState("");
+  const [nearbyList, setNearbyList] = useState([]);
+  const [zipInput, setZipInput] = useState("");
   const [form, setForm] = useState({
     attended: null,
     didNotAttendReason: "",
     rating: 0,
     waitTimeMinutes: null,
     informationAccurate: null,
+    inaccuracyTypes: [],
+    inaccuracyDetail: "",
     text: "",
     shareTextWithResource: false,
+    displayName: "",
     photoUrl: null,
     photoPublic: false,
+    contactEmail: "",
+    contactFollowUp: false,
+    enterRaffle: false,
   });
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -239,7 +303,87 @@ export default function FeedbackForm({
 
   const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
 
+  const effectiveResourceId = selectedResourceId || resourceId;
+  const effectiveResourceName = selectedResourceName || resourceName;
+
+  const fetchNearby = (lat, lng) => {
+    fetch(`/api/resources/nearby?lat=${lat}&lng=${lng}&take=20`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setNearbyList(data);
+          setLocationStatus("ready");
+        } else {
+          setLocationError(data?.error || "Could not load nearby locations.");
+          setLocationStatus("error");
+        }
+      })
+      .catch((err) => {
+        setLocationError(err.message || "Failed to fetch nearby resources.");
+        setLocationStatus("error");
+      });
+  };
+
+  const getLocationAndFetch = () => {
+    setLocationError("");
+    setLocationStatus("getting");
+    if (!navigator.geolocation) {
+      setLocationError("Location is not supported by your browser.");
+      setLocationStatus("error");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        fetchNearby(lat, lng);
+      },
+      () => {
+        setLocationError("Location access denied or unavailable. Try entering a ZIP code instead.");
+        setLocationStatus("error");
+      },
+      { timeout: 10000, maximumAge: 60000 }
+    );
+  };
+
+  const geocodeZipAndFetch = () => {
+    const zip = zipInput.trim().replace(/\D/g, "").slice(0, 5);
+    if (!zip || zip.length < 5) {
+      setLocationError("Please enter a valid 5-digit ZIP code.");
+      setLocationStatus("error");
+      return;
+    }
+    setLocationError("");
+    setLocationStatus("getting");
+    fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(zip + ", USA")}&limit=1`,
+      { headers: { Accept: "application/json" } }
+    )
+      .then((r) => r.json())
+      .then((results) => {
+        if (!results?.length || results[0].lat == null) {
+          setLocationError("ZIP code could not be found. Try using your location.");
+          setLocationStatus("error");
+          return;
+        }
+        const lat = parseFloat(results[0].lat);
+        const lng = parseFloat(results[0].lon);
+        fetchNearby(lat, lng);
+      })
+      .catch((err) => {
+        setLocationError(err.message || "Failed to geocode ZIP.");
+        setLocationStatus("error");
+      });
+  };
+
+  const selectResource = (r) => {
+    setSelectedResourceId(r.id);
+    setSelectedResourceName(r.name || "Food Pantry");
+    setStep("attendance");
+  };
+
   const canAdvance = () => {
+    if (step === "location") return !!selectedResourceId;
     if (step === "attendance") return form.attended !== null;
     if (step === "experience") {
       if (form.attended === false) return !!form.didNotAttendReason;
@@ -250,13 +394,13 @@ export default function FeedbackForm({
   };
 
   const next = () => {
-    const idx = STEPS.indexOf(step);
-    if (idx < STEPS.length - 1) setStep(STEPS[idx + 1]);
+    const idx = steps.indexOf(step);
+    if (idx >= 0 && idx < steps.length - 1) setStep(steps[idx + 1]);
   };
 
   const back = () => {
-    const idx = STEPS.indexOf(step);
-    if (idx > 0) setStep(STEPS[idx - 1]);
+    const idx = steps.indexOf(step);
+    if (idx > 0) setStep(steps[idx - 1]);
   };
 
   const handleSubmit = async () => {
@@ -270,7 +414,7 @@ export default function FeedbackForm({
       deletedAt: null,
 
       authorId: "anonymous", // TODO: replace with authenticated user ID
-      resourceId,
+      resourceId: effectiveResourceId || "unspecified",
       occurrenceId: null,    // TODO: pass as prop when linking to a specific visit
       userId: null,
       reviewedByUserId: null,
@@ -283,11 +427,26 @@ export default function FeedbackForm({
       waitTimeMinutes: form.attended === true ? form.waitTimeMinutes : null,
 
       informationAccurate: form.informationAccurate,
+      inaccuracyTypes: form.informationAccurate === false ? form.inaccuracyTypes : [],
+      inaccuracyDetail:
+        form.informationAccurate === false && form.inaccuracyDetail.trim()
+          ? form.inaccuracyDetail.trim()
+          : null,
+
       text: form.text.trim() || null,
       shareTextWithResource: form.shareTextWithResource,
+      displayName: form.shareTextWithResource && form.displayName.trim()
+        ? form.displayName.trim()
+        : null,
 
       photoUrl: form.photoUrl || null,
       photoPublic: form.photoUrl ? form.photoPublic : null,
+
+      contactEmail: (form.enterRaffle || form.contactFollowUp) && form.contactEmail.trim()
+        ? form.contactEmail.trim()
+        : null,
+      contactFollowUp: form.contactFollowUp,
+      enterRaffle: form.enterRaffle,
     };
 
     try {
@@ -325,7 +484,7 @@ export default function FeedbackForm({
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          padding: "2rem 1.5rem",
+          padding: "2rem 1rem",
           background: "#f7f6f2",
           fontFamily: "'Georgia', serif",
         }}
@@ -480,7 +639,7 @@ export default function FeedbackForm({
               padding: 4,
             }}
           />
-          {STEPS.indexOf(step) > 0 && (
+          {steps.indexOf(step) > 0 && (
             <button
               type="button"
               onClick={back}
@@ -517,7 +676,7 @@ export default function FeedbackForm({
                 fontWeight: 500,
               }}
             >
-              {resourceName}
+              {effectiveResourceName}
             </div>
             <div
               style={{
@@ -531,23 +690,207 @@ export default function FeedbackForm({
             </div>
           </div>
           <div style={{ fontSize: 12, color: "#888780" }}>
-            {STEPS.indexOf(step) + 1}/{STEPS.length}
+            {steps.indexOf(step) + 1}/{steps.length}
           </div>
         </div>
-        <ProgressBar step={step} />
+        <ProgressBar steps={steps} step={step} />
       </div>
 
       {/* Body */}
       <div
         style={{
           flex: 1,
-          padding: "1.5rem 1.25rem",
+          padding: "1.5rem 1rem",
           maxWidth: 480,
           margin: "0 auto",
           width: "100%",
+          boxSizing: "border-box",
         }}
       >
-        {/* STEP 1: Attendance */}
+        {/* STEP: Location (only when no resourceId from URL) */}
+        {step === "location" && (
+          <div>
+            <p
+              style={{
+                fontSize: 15,
+                color: "#5a5955",
+                marginBottom: "1.25rem",
+                lineHeight: 1.6,
+              }}
+            >
+              Find the food pantry or resource you visited so we can attach your feedback to the right place.
+            </p>
+            {locationStatus === "error" && locationError && (
+              <div
+                style={{
+                  padding: "12px 16px",
+                  borderRadius: 12,
+                  background: "#FEE2E2",
+                  border: "1px solid #FECACA",
+                  color: "#991B1B",
+                  fontSize: 14,
+                  marginBottom: 12,
+                }}
+              >
+                {locationError}
+              </div>
+            )}
+            {locationStatus !== "ready" && (
+              <>
+                <button
+                  type="button"
+                  onClick={getLocationAndFetch}
+                  disabled={locationStatus === "getting"}
+                  style={{
+                    width: "100%",
+                    padding: "16px 20px",
+                    borderRadius: 14,
+                    border: "1.5px solid #2E8B6E",
+                    background: locationStatus === "getting" ? "#f0eeea" : "#E1F5EE",
+                    color: locationStatus === "getting" ? "#888780" : "#085041",
+                    fontFamily: "inherit",
+                    fontSize: 15,
+                    fontWeight: 500,
+                    cursor: locationStatus === "getting" ? "not-allowed" : "pointer",
+                    marginBottom: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 10,
+                  }}
+                >
+                  {locationStatus === "getting" ? "Finding nearby locations…" : <><span>📍</span> Use my location</>}
+                </button>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    marginTop: 8,
+                  }}
+                >
+                  <input
+                    type="text"
+                    placeholder="Or enter ZIP code"
+                    value={zipInput}
+                    onChange={(e) => setZipInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && geocodeZipAndFetch()}
+                    disabled={locationStatus === "getting"}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      padding: "12px 14px",
+                      borderRadius: 12,
+                      border: "1.5px solid #d0cdc4",
+                      fontFamily: "inherit",
+                      fontSize: 15,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={geocodeZipAndFetch}
+                    disabled={locationStatus === "getting"}
+                    style={{
+                      padding: "12px 18px",
+                      borderRadius: 12,
+                      border: "none",
+                      background: locationStatus === "getting" ? "#d0cdc4" : "#2E8B6E",
+                      color: "white",
+                      fontFamily: "inherit",
+                      fontSize: 14,
+                      fontWeight: 500,
+                      cursor: locationStatus === "getting" ? "not-allowed" : "pointer",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    Search
+                  </button>
+                </div>
+              </>
+            )}
+            {locationStatus === "ready" && nearbyList.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <p style={{ fontSize: 14, color: "#888780", marginBottom: 12 }}>
+                  Tap the location you visited:
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocationStatus("idle");
+                    setNearbyList([]);
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#2E8B6E",
+                    fontSize: 13,
+                    cursor: "pointer",
+                    padding: 0,
+                    marginBottom: 8,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  ← Search again
+                </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {nearbyList.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => selectResource(r)}
+                      style={{
+                        width: "100%",
+                        padding: "14px 16px",
+                        borderRadius: 12,
+                        border: "1.5px solid #d0cdc4",
+                        background: "white",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        transition: "all 0.15s",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <div style={{ fontSize: 15, fontWeight: 500, color: "#2c2c2a" }}>
+                        {r.name}
+                      </div>
+                      {(r.addressStreet1 || r.city) && (
+                        <div style={{ fontSize: 13, color: "#888780", marginTop: 4 }}>
+                          {[r.addressStreet1, r.city, r.state, r.zipCode].filter(Boolean).join(", ")}
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {locationStatus === "ready" && nearbyList.length === 0 && (
+              <div style={{ textAlign: "center", padding: "1rem 0" }}>
+                <p style={{ fontSize: 15, color: "#5a5955", marginBottom: 12 }}>
+                  No resources found near this location.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setLocationStatus("idle"); setNearbyList([]); }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#2E8B6E",
+                    fontSize: 14,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontWeight: 500,
+                  }}
+                >
+                  ← Try again
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* STEP: Attendance */}
         {step === "attendance" && (
           <div>
             <p
@@ -604,7 +947,7 @@ export default function FeedbackForm({
                   margin: "-0.5rem 0 1rem",
                 }}
               >
-                {STAR_LABELS[form.rating]}
+                {getStarLabel(form.rating)}
               </p>
             )}
           </div>
@@ -791,6 +1134,7 @@ export default function FeedbackForm({
                           flexDirection: "column",
                           alignItems: "center",
                           gap: 8,
+                          boxSizing: "border-box",
                         }}
                       >
                         <svg
@@ -851,6 +1195,61 @@ export default function FeedbackForm({
               </div>
             </div>
 
+            {/* Inaccuracy type — shown when informationAccurate is false */}
+            {form.informationAccurate === false && (
+              <div style={{ marginBottom: "1.75rem" }}>
+                <label
+                  style={{
+                    fontSize: 15,
+                    fontWeight: 500,
+                    color: "#2c2c2a",
+                    display: "block",
+                    marginBottom: 8,
+                  }}
+                >
+                  What was wrong?{" "}
+                  <span style={{ fontWeight: 400, color: "#888780" }}>
+                    (select all that apply)
+                  </span>
+                </label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                  {INACCURACY_TYPES.map((t) => (
+                    <Chip
+                      key={t.value}
+                      label={t.label}
+                      selected={form.inaccuracyTypes.includes(t.value)}
+                      onClick={() => {
+                        const current = form.inaccuracyTypes;
+                        const updated = current.includes(t.value)
+                          ? current.filter((v) => v !== t.value)
+                          : [...current, t.value];
+                        set("inaccuracyTypes", updated);
+                      }}
+                    />
+                  ))}
+                </div>
+                <textarea
+                  placeholder="Correct information (e.g. 'Hours are Mon–Fri 9am–1pm')  — optional"
+                  value={form.inaccuracyDetail}
+                  onChange={(e) => set("inaccuracyDetail", e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    border: "1.5px solid #f0a896",
+                    fontFamily: "inherit",
+                    fontSize: 14,
+                    resize: "none",
+                    minHeight: 72,
+                    boxSizing: "border-box",
+                    background: "#fff8f7",
+                    color: "#2c2c2a",
+                    lineHeight: 1.5,
+                  }}
+                />
+              </div>
+            )}
+
             <div style={{ marginBottom: "1.75rem" }}>
               <label
                 style={{
@@ -886,6 +1285,7 @@ export default function FeedbackForm({
                 }}
               />
               {form.text.length > 0 && (
+                <>
                 <label
                   style={{
                     display: "flex",
@@ -912,12 +1312,171 @@ export default function FeedbackForm({
                   <span
                     style={{ fontSize: 13, color: "#5a5955", lineHeight: 1.5 }}
                   >
-                    Share my written comments with {resourceName} so they can
+                    Share my written comments with {effectiveResourceName} so they can
                     improve their service
                   </span>
                 </label>
+                {/* Display name — only when sharing */}
+                {form.shareTextWithResource && (
+                <div style={{ marginTop: 12 }}>
+                  <input
+                    type="text"
+                    placeholder="Display name (e.g. Maria L.) — optional"
+                    value={form.displayName}
+                    onChange={(e) => set("displayName", e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "10px 14px",
+                      borderRadius: 10,
+                      border: "1.5px solid #d0cdc4",
+                      fontFamily: "inherit",
+                      fontSize: 14,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  <p style={{ fontSize: 12, color: "#888780", marginTop: 6, lineHeight: 1.5 }}>
+                    Used if your review is shared publicly. Leave blank to stay anonymous.
+                  </p>
+                </div>
+                )}
+                </>
               )}
             </div>
+          </div>
+        )}
+
+        {/* STEP: Contact / Raffle */}
+        {step === "contact" && (
+          <div>
+            <p
+              style={{
+                fontSize: 15,
+                color: "#5a5955",
+                marginBottom: "1.5rem",
+                lineHeight: 1.6,
+              }}
+            >
+              Everything you share is optional and confidential.
+            </p>
+
+            {/* Raffle opt-in */}
+            <div
+              style={{
+                background: "#FFF9E6",
+                border: "1.5px solid #FFE57A",
+                borderRadius: 14,
+                padding: "16px",
+                marginBottom: "1.25rem",
+                boxSizing: "border-box",
+              }}
+            >
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={form.enterRaffle}
+                  onChange={(e) => set("enterRaffle", e.target.checked)}
+                  style={{
+                    width: 20,
+                    height: 20,
+                    marginTop: 2,
+                    accentColor: "#D4A017",
+                    flexShrink: 0,
+                  }}
+                />
+                <div>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: "#3D2200", display: "block" }}>
+                    🎟 Enter the monthly raffle
+                  </span>
+                  <span style={{ fontSize: 13, color: "#7a6a50", lineHeight: 1.5, display: "block", marginTop: 3 }}>
+                    Lemontree gives away prizes each month to clients who submit feedback. Enter your email below to participate.
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {/* Follow-up opt-in */}
+            <div
+              style={{
+                background: "#F0FDF4",
+                border: "1.5px solid #9FE1CB",
+                borderRadius: 14,
+                padding: "16px",
+                marginBottom: "1.25rem",
+                boxSizing: "border-box",
+              }}
+            >
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={form.contactFollowUp}
+                  onChange={(e) => set("contactFollowUp", e.target.checked)}
+                  style={{
+                    width: 20,
+                    height: 20,
+                    marginTop: 2,
+                    accentColor: "#2E8B6E",
+                    flexShrink: 0,
+                  }}
+                />
+                <div>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: "#0F4C38", display: "block" }}>
+                    💬 Let Lemontree follow up with me
+                  </span>
+                  <span style={{ fontSize: 13, color: "#4a7a68", lineHeight: 1.5, display: "block", marginTop: 3 }}>
+                    If you had a negative experience, our team may reach out to help or pass feedback to the right place.
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {/* Email — shown when either opt-in is checked */}
+            {(form.enterRaffle || form.contactFollowUp) && (
+              <div style={{ marginBottom: "1rem" }}>
+                <label
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 500,
+                    color: "#2c2c2a",
+                    display: "block",
+                    marginBottom: 8,
+                  }}
+                >
+                  Email address
+                </label>
+                <input
+                  type="email"
+                  placeholder="you@example.com"
+                  value={form.contactEmail}
+                  onChange={(e) => set("contactEmail", e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    border: "1.5px solid #d0cdc4",
+                    fontFamily: "inherit",
+                    fontSize: 15,
+                    boxSizing: "border-box",
+                  }}
+                />
+                <p style={{ fontSize: 12, color: "#888780", marginTop: 6, lineHeight: 1.5 }}>
+                  Your email is never shared publicly or sold.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -956,7 +1515,7 @@ export default function FeedbackForm({
                 },
               form.rating > 0 && {
                 label: "Rating",
-                value: `${form.rating}/5 — ${STAR_LABELS[form.rating]}`,
+                value: `${form.rating}/5 — ${getStarLabel(form.rating)}`,
               },
               form.waitTimeMinutes !== null && {
                 label: "Wait time",
@@ -988,6 +1547,16 @@ export default function FeedbackForm({
                 label: "Shared with pantry",
                 value: "Yes",
               },
+              form.displayName && {
+                label: "Display name",
+                value: form.displayName,
+              },
+              form.informationAccurate === false && form.inaccuracyTypes.length > 0 && {
+                label: "What was wrong",
+                value: form.inaccuracyTypes.join(", "),
+              },
+              form.enterRaffle && { label: "Raffle entry", value: "Yes ✓" },
+              form.contactFollowUp && { label: "Follow-up", value: "Yes — via email" },
             ]
               .filter(Boolean)
               .map((row) => (
@@ -1010,7 +1579,9 @@ export default function FeedbackForm({
                       color: row.accent ? "#0F6E56" : "#2c2c2a",
                       fontWeight: row.accent ? 500 : 400,
                       flex: 1,
+                      minWidth: 0,
                       lineHeight: 1.5,
+                      overflowWrap: "anywhere",
                     }}
                   >
                     {row.value}
@@ -1048,7 +1619,7 @@ export default function FeedbackForm({
         style={{
           background: "white",
           borderTop: "1px solid #eae8e2",
-          padding: "1rem 1.25rem",
+          padding: "1rem",
           position: "sticky",
           bottom: 0,
         }}

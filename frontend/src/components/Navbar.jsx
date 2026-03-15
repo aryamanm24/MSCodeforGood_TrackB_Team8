@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 const modes = [
-  { id: "operator", label: "Pantry operator", icon: "" },
+  { id: "operator", label: "Resource operator", icon: "" },
   { id: "donor", label: "Donor / Funder", icon: "" },
   { id: "government", label: "Government", icon: "" },
 ];
@@ -79,6 +79,30 @@ export default function Navbar({
           }
         >
           🔍 Explore resources
+        </Link>
+        <Link
+          href="/report-builder"
+          style={{
+            fontSize: "12px",
+            fontWeight: 600,
+            color: "var(--theme-navbar-text, #3D2200)",
+            textDecoration: "none",
+            padding: "5px 12px",
+            borderRadius: "8px",
+            background: "rgba(255,255,255,0.45)",
+            border: "1.5px solid rgba(61,34,0,0.12)",
+            whiteSpace: "nowrap",
+            transition: "background 0.15s",
+            fontFamily: "DM Sans, system-ui, sans-serif",
+          }}
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.background = "rgba(255,255,255,0.75)")
+          }
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.background = "rgba(255,255,255,0.45)")
+          }
+        >
+          📊 Report Builder
         </Link>
       </div>
 

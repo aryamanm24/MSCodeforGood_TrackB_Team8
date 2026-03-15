@@ -233,3 +233,21 @@ body {
 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
   background: rgb(var(--theme-text-subtle-rgb));
 }
+
+/* Tab bar horizontal scroll — hide scrollbar */
+.workspace-tab-scroll::-webkit-scrollbar {
+  display: none;
+}
+.workspace-tab-scroll {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Tab content switch fade */
+.workspace-tab-content {
+  animation: workspaceTabFade 150ms ease-in-out;
+}
+@keyframes workspaceTabFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

@@ -1,16 +1,42 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useState, useMemo } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { resources, censusTracts, donorPortfolio, govData } from "@/lib/mockData";
+import { resources as defaultResources, censusTracts, donorPortfolio, govData as defaultGovData } from "@/lib/mockData";
 import { ratingColor, povertyOpacity } from "@/lib/helpers";
 import { CENSUS_LAYERS } from "@/lib/constants";
+
+/** Normalize API resource (raw from Supabase) to map pin shape. */
+function normalizeResourceForMap(r) {
+  if (!r) return null;
+  const raw = r.raw || r;
+  const lat = raw.latitude ?? raw.lat ?? r.latitude ?? r.lat;
+  const lng = raw.longitude ?? raw.lng ?? r.longitude ?? r.lng;
+  if (lat == null || lng == null) return null;
+  const name = raw.name ?? r.name ?? "";
+  const rating = raw.rating_average ?? raw.ratingAverage ?? raw.rating ?? r.rating_average ?? r.rating;
+  const reviews = raw.review_count ?? raw.reviewCount ?? raw.reviews ?? r.review_count ?? r.reviews;
+  const type = raw.resource_type_name ?? raw.resourceType?.name ?? raw.resourceType?.id ?? r.resource_type_name ?? r.type ?? "FOOD_PANTRY";
+  let tags = raw.tags ?? r.tags ?? raw.tag_ids ?? r.tag_ids ?? [];
+  if (!Array.isArray(tags)) tags = [];
+  const tagNames = tags.map((t) => (typeof t === "string" ? t : t?.name ?? "")).filter(Boolean);
+  return { lat: Number(lat), lng: Number(lng), name, rating: rating != null ? Number(rating) : null, reviews: reviews != null ? Number(reviews) : null, type, tags: tagNames };
+}
 
 const viewConfigs = {
   operator: { center: [40.708, -74.005], zoom: 16, resource: "res_002" },
   donor: { center: [40.714, -73.998], zoom: 14 },
-  government: { center: [40.712, -73.998], zoom: 13.5 },
+  // Center on Central Harlem cluster so all 5 underserved ZIPs are visible
+  government: { center: [40.8116, -73.9465], zoom: 12 },
+};
+
+// Camera position per government tab
+const GOV_TAB_CAMERA = {
+  overview:    { center: [40.7128, -74.006],  zoom: 10 },
+  underserved: { center: [40.8116, -73.9465], zoom: 12 },
+  barriers:    { center: [40.8116, -73.9465], zoom: 11 },
+  gaps:        { center: [40.8116, -73.9465], zoom: 11 },
 };
 
 // 3-tier poverty color: blue (low) -> orange (mid) -> red (high)
@@ -33,6 +59,8 @@ export default function MapView({
   censusLayer,
   onResourceSelect,
   onInvalidateRef,
+  govData: govDataProp,
+  resources: resourcesProp,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -40,6 +68,17 @@ export default function MapView({
   const overlaysRef = useRef([]);
   const censusOverlaysRef = useRef([]);
   const selectedZipOverlayRef = useRef(null);
+
+  const effectiveGovData = govDataProp ?? defaultGovData;
+  const effectiveResources = useMemo(() => {
+    const list = resourcesProp ?? defaultResources;
+    return list.map(normalizeResourceForMap).filter(Boolean);
+  }, [resourcesProp]);
+
+  const govDataRef = useRef(effectiveGovData);
+  const resourcesForMapRef = useRef(effectiveResources);
+  govDataRef.current = effectiveGovData;
+  resourcesForMapRef.current = effectiveResources;
 
   // Active government tab — tracked via custom events from GovernmentPanel
   const [activeGovTab, setActiveGovTab] = useState("overview");
@@ -121,8 +160,17 @@ export default function MapView({
     return () => clearTimeout(timer);
   }, [mode, clear]);
 
+  // When gov data or resources update in government mode, redraw the map
+  useEffect(() => {
+    if (mode !== "government") return;
+    const map = mapRef.current;
+    if (!map) return;
+    clear();
+    renderGovRef.current(map, govTabRef.current);
+  }, [effectiveGovData, effectiveResources, clear]);
+
   function renderOperator(map, activeId) {
-    resources.forEach((r) => {
+    defaultResources.forEach((r) => {
       const isActive = r.id === activeId;
       const color = ratingColor(r.rating);
       const isSoup = r.type === "SOUP_KITCHEN";
@@ -156,14 +204,14 @@ export default function MapView({
       markersRef.current.push(marker);
     });
 
-    const active = resources.find((r) => r.id === activeId);
+    const active = defaultResources.find((r) => r.id === activeId);
     if (active) onResourceSelect(active);
   }
 
   function renderDonor(map) {
     const fundedIds = donorPortfolio.fundedResourceIds;
 
-    resources.forEach((r) => {
+    defaultResources.forEach((r) => {
       const isFunded = fundedIds.includes(r.id);
       const color = ratingColor(r.rating);
       const isSoup = r.type === "SOUP_KITCHEN";
@@ -215,10 +263,12 @@ export default function MapView({
   // Keep renderGovRef pointing to the latest version of this function
   // so event listeners can call it without stale-closure issues.
   function renderGovernmentForTab(map, tab) {
+    const govData = govDataRef.current;
+    const resourcesList = resourcesForMapRef.current;
     const dimMarkers = tab === "underserved" || tab === "gaps";
 
     // ── 1) Underserved ZIP polygons ──
-    govData.underservedZips.forEach((z) => {
+    (govData?.underservedZips ?? []).forEach((z) => {
       const fillColor = z.needScore >= 70 ? "#EF4444" : "#F59E0B";
       // Dim polygons when barriers tab is active (markers take focus there)
       const fillOpacity = tab === "barriers"
@@ -275,7 +325,7 @@ export default function MapView({
 
     // ── 2) Zero-pantry ZIP outlines (shown on overview, underserved, gaps) ──
     if (tab !== "barriers") {
-      govData.zeroPantryZips.forEach((z) => {
+      (govData?.zeroPantryZips ?? []).forEach((z) => {
         const rect = L.rectangle(z.bounds, {
           color: "#DC2626",
           weight: 2,
@@ -321,11 +371,11 @@ export default function MapView({
     }
 
     // ── 3) Resource pins — color/opacity varies by tab ──
-    resources.forEach((r) => {
+    resourcesList.forEach((r) => {
       let color;
       if (tab === "barriers") {
         // Color by access barrier type
-        const tags = (r.tags ?? []).map((t) => t.toLowerCase());
+        const tags = (r.tags ?? []).map((t) => String(t).toLowerCase());
         if (tags.some((t) => t.includes("id required")))       color = "#EF4444";
         else if (tags.some((t) => t.includes("registration"))) color = "#F59E0B";
         else                                                     color = "#1D9E75";
@@ -380,6 +430,9 @@ export default function MapView({
       if (!map) return;
       clear();
       renderGovRef.current(map, tab);
+      // Fly to the canonical view for each tab
+      const cam = GOV_TAB_CAMERA[tab] ?? GOV_TAB_CAMERA.overview;
+      map.flyTo(cam.center, cam.zoom, { duration: 0.9, easeLinearity: 0.25 });
     };
 
     const handleFlyTo = (e) => {
@@ -510,14 +563,14 @@ export default function MapView({
         style={{ background: "#f0ede7" }}
       />
 
-      {/* Default legend when no census layer is selected */}
+      {/* Default legend when no census layer is selected — always bottom-left */}
       {mode === "government" && !activeLegend && (
         <div
           className="absolute bottom-5 left-4 z-[800] bg-white rounded-xl p-3.5 border border-sand-200"
           style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.1)" }}
         >
           {activeGovTab === "barriers" ? (
-            /* ── Barrier tab legend ── */
+            /* ── Barriers tab: colored by access barrier type ── */
             <>
               <div className="text-[9px] font-semibold text-sand-400 uppercase tracking-widest mb-2">
                 Colored by access barrier
@@ -536,11 +589,37 @@ export default function MapView({
                 ))}
               </div>
             </>
-          ) : (
-            /* ── Default / other tabs legend ── */
+          ) : activeGovTab === "gaps" ? (
+            /* ── Gaps tab: colored by resource type ── */
             <>
               <div className="text-[9px] font-semibold text-sand-400 uppercase tracking-widest mb-2">
-                Resources
+                Resource type
+              </div>
+              <div className="space-y-1.5">
+                {[
+                  { label: "Food pantry",       color: "#1D9E75", round: true },
+                  { label: "Community fridge",  color: "#3B82F6", round: true },
+                  { label: "Soup kitchen",      color: "#1D9E75", round: false },
+                ].map(({ label, color, round }) => (
+                  <div key={label} className="flex items-center gap-2">
+                    <div className="w-4 h-4 shrink-0 border-2 border-white"
+                      style={{ backgroundColor: color, borderRadius: round ? "50%" : "3px", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+                    <span className="text-[10px] text-sand-600">{label}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="pt-2 mt-2 border-t border-sand-100 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-3 rounded-sm shrink-0" style={{ background: "#EF4444", opacity: 0.35 }} />
+                  <span className="text-[10px] text-sand-600">Underserved ZIP</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            /* ── Overview / Underserved tabs: poverty rate + resource markers ── */
+            <>
+              <div className="text-[9px] font-semibold text-sand-400 uppercase tracking-widest mb-2">
+                Resources (by rating)
               </div>
               <div className="space-y-1.5">
                 {governmentResourceLegend.map(({ label, color, round }) => (

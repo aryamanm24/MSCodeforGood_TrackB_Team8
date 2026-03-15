@@ -3,8 +3,9 @@
 import { useState } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  ScatterChart, Scatter, ZAxis, ReferenceArea,
 } from "recharts";
-import { govData } from "@/lib/mockData";
+import { govData as defaultGovData } from "@/lib/mockData";
 import Footer from "./Footer";
 import ALICETab from "./ALICETab";
 
@@ -19,13 +20,43 @@ const TABS = [
 
 ];
 
-const RESOURCE_TYPES = [
-  { label: "Food pantries",  count: 1636, pct: 83, color: "#2D6A4F" },
-  { label: "Soup kitchens",  count: 214,  pct: 11, color: "#0D9488" },
-  { label: "Comm. fridges",  count: 84,   pct:  4, color: "#3B82F6" },
-  { label: "Meal delivery",  count: 14,   pct:  1, color: "#8B5CF6" },
-  { label: "Other",          count: 28,   pct:  1, color: "#9CA3AF" },
+// Priority matrix data — ZIP codes by coverage (x) vs poverty (y), sized by food-insecure pop
+const SCATTER_POINTS = [
+  { zip: "10030", name: "Central Harlem N",  x: 1.37, y: 36.4,  size: 14943, color: "#EF4444", needScore: 74 },
+  { zip: "10029", name: "East Harlem",        x: 1.03, y: 30.98, size: 33593, color: "#EF4444", needScore: 73 },
+  { zip: "10039", name: "Washington Hts",     x: 1.23, y: 28.47, size: 12951, color: "#F59E0B", needScore: 67 },
+  { zip: "10031", name: "Hamilton Hts",       x: 0.98, y: 23.95, size: 20471, color: "#F59E0B", needScore: 57 },
+  { zip: "10032", name: "Washington Hts S",   x: 1.08, y: 22.41, size: 17449, color: "#F59E0B", needScore: 59 },
+  { zip: "10038", name: "Financial District", x: 0,    y: 19.38, size: 6031,  color: "#F59E0B", needScore: 56 },
+  { zip: "10016", name: "Murray Hill",        x: 0,    y: 10.78, size: 7996,  color: "#EAB308", needScore: 49 },
 ];
+
+// ID barrier concentration by neighborhood (hardcoded estimates from tag cross-ref)
+const ID_BARRIERS_BY_NBHD = [
+  { name: "East Harlem (10029)",    pct: 68 },
+  { name: "Central Harlem (10030)", pct: 58 },
+  { name: "Washington Hts (10039)", pct: 47 },
+  { name: "Hamilton Hts (10031)",   pct: 41 },
+  { name: "Financial Dist (10038)", pct: 31 },
+];
+
+// Maps filter select values → govData.boroughStats keys
+const BOROUGH_KEY_MAP = {
+  manhattan:    "Manhattan",
+  brooklyn:     "Brooklyn",
+  queens:       "Queens",
+  bronx:        "Bronx",
+  staten_island: "StatenIsland",
+};
+
+// Maps filter select values → display names
+const BOROUGH_DISPLAY = {
+  manhattan:    "Manhattan",
+  brooklyn:     "Brooklyn",
+  queens:       "Queens",
+  bronx:        "Bronx",
+  staten_island: "Staten Island",
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -40,11 +71,11 @@ function povertyColor(pct) {
   return "#374151";
 }
 
-function downloadCSV() {
+function downloadCSV(govData) {
   const rows = [
     ["Type","ZIP","Neighborhood","Poverty %","Food Insecure","Population","Pantries","SNAP/Pantry","Need Score","Median Income"],
-    ...govData.underservedZips.map((z) => ["Underserved",z.zip,z.neighborhood,z.poverty,z.foodInsecurity,z.population,z.pantryCount,z.snapPerPantry,z.needScore,z.medianIncome]),
-    ...govData.zeroPantryZips.map((z) => ["Zero-pantry",z.zip,z.neighborhood,z.poverty,z.foodInsecurity,z.population,z.pantryCount,"—",z.needScore,z.medianIncome]),
+    ...(govData.underservedZips || []).map((z) => ["Underserved",z.zip,z.neighborhood,z.poverty,z.foodInsecurity,z.population,z.pantryCount,z.snapPerPantry,z.needScore,z.medianIncome]),
+    ...(govData.zeroPantryZips || []).map((z) => ["Zero-pantry",z.zip,z.neighborhood,z.poverty,z.foodInsecurity,z.population,z.pantryCount,"—",z.needScore,z.medianIncome]),
   ];
   const csv = rows.map((r) => r.join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -56,7 +87,7 @@ function downloadCSV() {
   URL.revokeObjectURL(url);
 }
 
-// ── Shared sub-component ──────────────────────────────────────────────────────
+// ── Shared sub-components ─────────────────────────────────────────────────────
 
 function StatCard({ value, label, valueColor = "#111827", bg = "#F9FAFB", border = "#E5E7EB" }) {
   return (
@@ -67,16 +98,52 @@ function StatCard({ value, label, valueColor = "#111827", bg = "#F9FAFB", border
   );
 }
 
+// Custom dot for ScatterChart — color/size driven by payload
+function ScatterDot({ cx, cy, payload }) {
+  if (cx == null || cy == null) return null;
+  const r = Math.max(Math.sqrt(payload.size / 500), 6);
+  return (
+    <circle cx={cx} cy={cy} r={r}
+      fill={payload.color} fillOpacity={0.72}
+      stroke={payload.color} strokeWidth={1.5} />
+  );
+}
+
+// Custom tooltip for ScatterChart
+function ScatterTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0]?.payload;
+  if (!d) return null;
+  return (
+    <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", fontSize: 11, lineHeight: 1.7, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
+      <strong style={{ fontSize: 12 }}>ZIP {d.zip} — {d.name}</strong><br />
+      Poverty: <strong>{d.y}%</strong><br />
+      Coverage: <strong>{d.x} pantries / 10k</strong><br />
+      Food insecure: <strong>{d.size.toLocaleString()}</strong><br />
+      Need score: <strong style={{ color: d.color }}>{d.needScore}</strong>
+    </div>
+  );
+}
+
 // ── TAB 1: Overview ───────────────────────────────────────────────────────────
 
-function OverviewTab() {
+function OverviewTab({ filters, govData }) {
+  const bKey     = BOROUGH_KEY_MAP[filters.borough];
+  const bStats   = bKey ? govData?.boroughStats?.[bKey] : null;
+  const bLabel   = filters.borough !== "all" ? BOROUGH_DISPLAY[filters.borough] : null;
+
+  const totalVal     = bStats ? bStats.total.toLocaleString() : "1,976";
+  const publishedVal = bStats ? bStats.published.toLocaleString() : "1,343";
+  const unavailPct   = bStats ? Math.round(bStats.unavailable / bStats.total * 100) : 32;
+  const unavailVal   = bStats ? `${bStats.unavailable} (${unavailPct}%)` : "633 (32%)";
+
   return (
     <div>
-      {/* 3 stat cards */}
+      {/* 3 stat cards — borough-aware when filter active */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <StatCard value="1,976"     label="food resources in NYC" />
-        <StatCard value="1,343"     label="currently published"   valueColor="#166534" bg="#F0FDF4" border="#BBF7D0" />
-        <StatCard value="633 (32%)" label="currently unavailable" valueColor="#991B1B" bg="#FEF2F2" border="#FECACA" />
+        <StatCard value={totalVal}     label={bLabel ? `food resources in ${bLabel}` : "food resources in NYC"} />
+        <StatCard value={publishedVal} label="currently published"   valueColor="#166534" bg="#F0FDF4" border="#BBF7D0" />
+        <StatCard value={unavailVal}   label="currently unavailable" valueColor="#991B1B" bg="#FEF2F2" border="#FECACA" />
       </div>
 
       {/* Avg rating card */}
@@ -92,29 +159,43 @@ function OverviewTab() {
         </div>
       </div>
 
-      {/* Resource type breakdown */}
+      {/* Action priority matrix — ScatterChart */}
       <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", marginBottom: 10 }}>
-          What&apos;s in the network
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", marginBottom: 2 }}>
+          Action priority matrix
         </div>
-        {/* Stacked bar */}
-        <div style={{ display: "flex", height: 20, borderRadius: 6, overflow: "hidden", marginBottom: 10 }}>
-          {RESOURCE_TYPES.map((t) => (
-            <div
-              key={t.label}
-              style={{ width: `${t.pct}%`, background: t.color }}
-              title={`${t.label}: ${t.count}`}
+        <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 10 }}>
+          ZIP codes plotted by need vs current coverage — hover for details
+        </div>
+        <ResponsiveContainer width="100%" height={250}>
+          <ScatterChart margin={{ top: 10, right: 16, bottom: 28, left: 4 }}>
+            {/* Quadrant background fills */}
+            <ReferenceArea x1={0} x2={1.5} y1={20} y2={40} fill="#FEE2E2" fillOpacity={0.45}
+              label={{ value: "CRITICAL", position: "insideTopLeft", style: { fill: "#DC2626", fontSize: 9, fontWeight: 700 } }} />
+            <ReferenceArea x1={1.5} x2={3} y1={20} y2={40} fill="#FEF3C7" fillOpacity={0.4}
+              label={{ value: "Monitored", position: "insideTopRight", style: { fill: "#92400E", fontSize: 9, fontWeight: 600 } }} />
+            <ReferenceArea x1={0} x2={1.5} y1={0} y2={20} fill="#F3F4F6" fillOpacity={0.5}
+              label={{ value: "Gap zone", position: "insideBottomLeft", style: { fill: "#6B7280", fontSize: 9, fontWeight: 600 } }} />
+            <ReferenceArea x1={1.5} x2={3} y1={0} y2={20} fill="#F0FDF4" fillOpacity={0.5}
+              label={{ value: "Served", position: "insideBottomRight", style: { fill: "#166534", fontSize: 9, fontWeight: 600 } }} />
+
+            <XAxis
+              type="number" dataKey="x" name="Pantries / 10k" domain={[0, 3]}
+              tick={{ fontSize: 9, fill: "#9CA3AF" }} axisLine={false} tickLine={false}
+              label={{ value: "Pantries per 10k residents", position: "insideBottom", offset: -14, style: { fontSize: 9, fill: "#9CA3AF" } }}
             />
-          ))}
-        </div>
-        {/* Legend */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
-          {RESOURCE_TYPES.map((t) => (
-            <div key={t.label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#374151" }}>
-              <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: t.color, flexShrink: 0 }} />
-              {t.label} ({t.count})
-            </div>
-          ))}
+            <YAxis
+              type="number" dataKey="y" name="Poverty %" domain={[0, 40]}
+              tick={{ fontSize: 9, fill: "#9CA3AF" }} axisLine={false} tickLine={false}
+              label={{ value: "Poverty %", angle: -90, position: "insideLeft", style: { fontSize: 9, fill: "#9CA3AF" } }}
+            />
+            <ZAxis type="number" dataKey="size" range={[60, 360]} />
+            <Tooltip content={<ScatterTooltip />} cursor={{ strokeDasharray: "3 3" }} />
+            <Scatter data={SCATTER_POINTS} shape={<ScatterDot />} />
+          </ScatterChart>
+        </ResponsiveContainer>
+        <div style={{ fontSize: 10, color: "#9CA3AF", textAlign: "center", marginTop: 2 }}>
+          Dot size = food-insecure population · Red = critical (≥70), orange = high, yellow = moderate
         </div>
       </div>
 
@@ -127,7 +208,7 @@ function OverviewTab() {
           Print / Save as PDF
         </button>
         <button
-          onClick={downloadCSV}
+          onClick={() => downloadCSV(govData)}
           style={{ padding: "9px 0", background: "#fff", color: "#374151", fontSize: 12, fontWeight: 600, borderRadius: 10, border: "1px solid #D1D5DB", cursor: "pointer" }}
         >
           Download CSV
@@ -139,11 +220,16 @@ function OverviewTab() {
 
 // ── TAB 2: Underserved Areas ──────────────────────────────────────────────────
 
-function UnderservedTab({ filters, flyTo }) {
+function UnderservedTab({ filters, flyTo, govData }) {
   const [selectedZip, setSelectedZip] = useState(null);
 
-  const filteredZips = govData.underservedZips
+  const filteredZips = (govData?.underservedZips ?? [])
     .filter((z) => {
+      // Borough filter — all underserved ZIPs are Manhattan; other boroughs show empty state
+      if (filters.borough !== "all") {
+        const expectedBorough = BOROUGH_DISPLAY[filters.borough] ?? "";
+        if ((z.borough ?? "Manhattan") !== expectedBorough) return false;
+      }
       if (filters.poverty === "high"   && z.poverty <  30) return false;
       if (filters.poverty === "medium" && (z.poverty < 15 || z.poverty >= 30)) return false;
       if (filters.poverty === "low"    && z.poverty >= 15) return false;
@@ -164,50 +250,55 @@ function UnderservedTab({ filters, flyTo }) {
       </div>
 
       {/* ZIP cards */}
-      {filteredZips.length === 0 && (
-        <div style={{ fontSize: 13, color: "#6B7280", textAlign: "center", padding: "24px 0" }}>
-          No ZIP codes match the current filters.
+      {filteredZips.length === 0 ? (
+        <div style={{ fontSize: 13, color: "#6B7280", textAlign: "center", padding: "28px 0", background: "#F9FAFB", borderRadius: 12, border: "1px solid #E5E7EB" }}>
+          No underserved areas found for this filter.
+          {filters.borough !== "all" && (
+            <div style={{ fontSize: 11, marginTop: 6, color: "#9CA3AF" }}>
+              All 5 underserved ZIP codes are in Manhattan.
+            </div>
+          )}
         </div>
-      )}
-
-      {filteredZips.map((z) => {
-        const badge = needBadge(z.needScore);
-        const borderColor = z.needScore >= 70 ? "#EF4444" : "#F59E0B";
-        const isSelected = selectedZip === z.zip;
-        return (
-          <div
-            key={z.zip}
-            onClick={() => handleCardClick(z)}
-            style={{
-              background: isSelected ? "#FAFAF9" : "#fff",
-              border: `1px solid ${isSelected ? borderColor : "#E5E7EB"}`,
-              borderLeft: `4px solid ${borderColor}`,
-              borderRadius: 12,
-              padding: "14px 16px",
-              marginBottom: 10,
-              cursor: "pointer",
-              boxShadow: isSelected ? `0 2px 8px ${borderColor}28` : "0 1px 3px rgba(0,0,0,0.05)",
-              transition: "box-shadow 0.15s, border-color 0.15s",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{z.neighborhood}</div>
-                <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>ZIP {z.zip}</div>
+      ) : (
+        filteredZips.map((z) => {
+          const badge = needBadge(z.needScore);
+          const borderColor = z.needScore >= 70 ? "#EF4444" : "#F59E0B";
+          const isSelected = selectedZip === z.zip;
+          return (
+            <div
+              key={z.zip}
+              onClick={() => handleCardClick(z)}
+              style={{
+                background: isSelected ? "#FAFAF9" : "#fff",
+                border: `1px solid ${isSelected ? borderColor : "#E5E7EB"}`,
+                borderLeft: `4px solid ${borderColor}`,
+                borderRadius: 12,
+                padding: "14px 16px",
+                marginBottom: 10,
+                cursor: "pointer",
+                boxShadow: isSelected ? `0 2px 8px ${borderColor}28` : "0 1px 3px rgba(0,0,0,0.05)",
+                transition: "box-shadow 0.15s, border-color 0.15s",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{z.neighborhood}</div>
+                  <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>ZIP {z.zip}</div>
+                </div>
+                <span style={{ background: badge.bg, color: badge.text, border: `1px solid ${badge.border}`, borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+                  Need: {z.needScore}
+                </span>
               </div>
-              <span style={{ background: badge.bg, color: badge.text, border: `1px solid ${badge.border}`, borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
-                Need: {z.needScore}
-              </span>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 11, color: "#6B7280" }}>
+                <span>Poverty: <strong style={{ color: povertyColor(z.poverty) }}>{z.poverty.toFixed(1)}%</strong></span>
+                <span>Food insecure: <strong style={{ color: "#374151" }}>{z.foodInsecurity.toLocaleString()}</strong></span>
+                <span>Pantries: <strong style={{ color: "#374151" }}>{z.pantryCount}</strong></span>
+                <span>SNAP / pantry: <strong style={{ color: "#374151" }}>{z.snapPerPantry.toLocaleString()}</strong></span>
+              </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 11, color: "#6B7280" }}>
-              <span>Poverty: <strong style={{ color: povertyColor(z.poverty) }}>{z.poverty.toFixed(1)}%</strong></span>
-              <span>Food insecure: <strong style={{ color: "#374151" }}>{z.foodInsecurity.toLocaleString()}</strong></span>
-              <span>Pantries: <strong style={{ color: "#374151" }}>{z.pantryCount}</strong></span>
-              <span>SNAP / pantry: <strong style={{ color: "#374151" }}>{z.snapPerPantry.toLocaleString()}</strong></span>
-            </div>
-          </div>
-        );
-      })}
+          );
+        })
+      )}
 
       {/* Insight callout */}
       <div style={{ padding: "10px 12px", background: "#F0FDF4", borderLeft: "3px solid #2D6A4F", borderRadius: "0 8px 8px 0", fontSize: 12, color: "#166534", lineHeight: 1.5, marginBottom: 18 }}>
@@ -219,7 +310,7 @@ function UnderservedTab({ filters, flyTo }) {
         ZIP codes with zero food resources
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        {govData.zeroPantryZips.map((z) => (
+        {(govData?.zeroPantryZips ?? []).map((z) => (
           <div
             key={z.zip}
             onClick={() => flyTo(z.lat, z.lng, 14)}
@@ -244,9 +335,9 @@ function UnderservedTab({ filters, flyTo }) {
 
 // ── TAB 3: Access Barriers ────────────────────────────────────────────────────
 
-function AccessBarriersTab() {
-  const { barriers, totalPublished } = govData.accessBarriers;
-  const rel = govData.reliability;
+function AccessBarriersTab({ govData }) {
+  const { barriers, totalPublished } = govData?.accessBarriers ?? { barriers: [], totalPublished: 0 };
+  const rel = govData?.reliability ?? { unavailableInUnderservedZips: 0, publishedInUnderservedZips: 0, pctOfflineInUnderserved: 0 };
   const available = rel.publishedInUnderservedZips;
   const unavailable = rel.unavailableInUnderservedZips;
   const total = available + unavailable;
@@ -276,7 +367,7 @@ function AccessBarriersTab() {
           </span>
         </div>
         <div style={{ fontSize: 11, color: "#991B1B", marginTop: 9, lineHeight: 1.5 }}>
-          This exceeds the city-wide offline rate of {govData.systemStats.unavailableRate}% — high-need areas face disproportionately unreliable service.
+          This exceeds the city-wide offline rate of {govData?.systemStats?.unavailableRate ?? 32}% — high-need areas face disproportionately unreliable service.
         </div>
       </div>
 
@@ -309,8 +400,34 @@ function AccessBarriersTab() {
       </div>
 
       {/* Policy insight */}
-      <div style={{ padding: "10px 12px", background: "#FEF2F2", borderLeft: "3px solid #EF4444", borderRadius: "0 8px 8px 0", fontSize: 12, color: "#991B1B", lineHeight: 1.5 }}>
+      <div style={{ padding: "10px 12px", background: "#FEF2F2", borderLeft: "3px solid #EF4444", borderRadius: "0 8px 8px 0", fontSize: 12, color: "#991B1B", lineHeight: 1.5, marginBottom: 14 }}>
         31% of published resources require ID — a significant barrier for undocumented residents, who represent a substantial portion of food-insecure populations in Manhattan.
+      </div>
+
+      {/* ID barriers by neighborhood */}
+      <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, padding: "14px 16px", marginBottom: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", marginBottom: 3 }}>
+          Where ID barriers are most concentrated
+        </div>
+        <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 12 }}>
+          % of resources requiring ID, by neighborhood
+        </div>
+        {ID_BARRIERS_BY_NBHD.map((n) => (
+          <div key={n.name} style={{ marginBottom: 11 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, fontSize: 11 }}>
+              <span style={{ color: "#374151" }}>{n.name}</span>
+              <span style={{ fontWeight: 700, color: "#DC2626" }}>{n.pct}%</span>
+            </div>
+            <div style={{ height: 8, borderRadius: 4, background: "#F3F4F6", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${n.pct}%`, background: "#EF4444", borderRadius: 4 }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Compounding barrier callout */}
+      <div style={{ padding: "10px 12px", background: "#FEF2F2", borderLeft: "3px solid #EF4444", borderRadius: "0 8px 8px 0", fontSize: 12, color: "#991B1B", lineHeight: 1.5 }}>
+        The highest-need neighborhoods also have the highest concentration of ID requirements — creating a compounding barrier for the most vulnerable residents.
       </div>
     </div>
   );
@@ -318,8 +435,8 @@ function AccessBarriersTab() {
 
 // ── TAB 4: Resource Gaps ──────────────────────────────────────────────────────
 
-function ResourceGapsTab() {
-  const f = govData.communityFridges;
+function ResourceGapsTab({ govData }) {
+  const f = govData?.communityFridges ?? { total: 0, inUnderservedZips: 0, pctMisaligned: 0, topZips: [] };
 
   return (
     <div>
@@ -343,19 +460,49 @@ function ResourceGapsTab() {
         </div>
       </div>
 
-      {/* Top fridge ZIPs */}
-      <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", marginBottom: 10 }}>Where fridges currently are</div>
-        {f.topZips.map((z) => (
-          <div key={z.zip} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: 12, color: "#374151" }}>
-            <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: z.underserved ? "#2D6A4F" : "#D1D5DB", flexShrink: 0 }} />
-            <span style={{ fontWeight: 600 }}>ZIP {z.zip}</span>
-            <span style={{ color: "#6B7280" }}>— {z.count} fridges</span>
-            <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 600, color: z.underserved ? "#166534" : "#9CA3AF" }}>
-              {z.underserved ? "Underserved area" : "Not underserved"}
-            </span>
+      {/* Where fridges are vs where they should be */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+        {/* Left: current clusters */}
+        <div style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 12, padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 4 }}>
+            Current fridge clusters
           </div>
-        ))}
+          <div style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 10 }}>not underserved</div>
+          {[
+            { area: "Bushwick, Brooklyn",       zips: "11221, 11206", count: 6 },
+            { area: "Carroll Gardens, Brooklyn", zips: "11231",        count: 3 },
+            { area: "Crown Heights, Brooklyn",   zips: "11216",        count: 3 },
+            { area: "Mott Haven, Bronx",         zips: "10454",        count: 2 },
+          ].map((c) => (
+            <div key={c.zips} style={{ marginBottom: 9, fontSize: 11, color: "#6B7280" }}>
+              <div style={{ fontWeight: 600, color: "#374151" }}>{c.area}</div>
+              <div>ZIPs {c.zips} — <strong>{c.count} fridges</strong></div>
+            </div>
+          ))}
+        </div>
+
+        {/* Right: recommended zones */}
+        <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 12, padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#166534", marginBottom: 4 }}>
+            Recommended zones
+          </div>
+          <div style={{ fontSize: 10, color: "#4ADE80", marginBottom: 10 }}>underserved · 0 fridges</div>
+          {[
+            { area: "Central Harlem N", zip: "10030", needScore: 74.3 },
+            { area: "East Harlem",      zip: "10029", needScore: 73.1 },
+            { area: "Washington Hts",   zip: "10039", needScore: 66.8 },
+          ].map((r) => (
+            <div key={r.zip} style={{ marginBottom: 9, fontSize: 11, color: "#166534" }}>
+              <div style={{ fontWeight: 600 }}>{r.area} ({r.zip})</div>
+              <div>Need: <strong>{r.needScore}</strong> · 0 fridges</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Key callout */}
+      <div style={{ padding: "10px 12px", background: "#FEF2F2", borderLeft: "3px solid #EF4444", borderRadius: "0 8px 8px 0", fontSize: 12, color: "#991B1B", lineHeight: 1.5, marginBottom: 12 }}>
+        85% of community fridges are located outside the highest-need ZIP codes.
       </div>
 
       {/* Methodology */}
@@ -371,7 +518,7 @@ function ResourceGapsTab() {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function GovernmentPanel() {
+export default function GovernmentPanel({ govData = defaultGovData, dataSource = "static" }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [filters, setFilters] = useState({ borough: "all", poverty: "all", status: "all" });
 
@@ -385,6 +532,18 @@ export default function GovernmentPanel() {
   };
 
   const activeFilterCount = Object.values(filters).filter((v) => v !== "all").length;
+
+  // Count underserved ZIPs that match current filters (used in filter bar)
+  const filteredZipCount = govData.underservedZips.filter((z) => {
+    if (filters.borough !== "all") {
+      const expectedBorough = BOROUGH_DISPLAY[filters.borough] ?? "";
+      if ((z.borough ?? "Manhattan") !== expectedBorough) return false;
+    }
+    if (filters.poverty === "high"   && z.poverty <  30) return false;
+    if (filters.poverty === "medium" && (z.poverty < 15 || z.poverty >= 30)) return false;
+    if (filters.poverty === "low"    && z.poverty >= 15) return false;
+    return true;
+  }).length;
 
   const FILTER_DEFS = [
     {
@@ -414,13 +573,18 @@ export default function GovernmentPanel() {
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
           <h3 style={{ fontSize: 15, fontWeight: 800, color: "#111827", margin: 0 }}>
             Coverage gap analysis
+            {dataSource === "supabase" && (
+              <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 600, color: "#166534", background: "#DCFCE7", padding: "2px 6px", borderRadius: 6 }}>
+                ● Live data
+              </span>
+            )}
           </h3>
           <div style={{ fontSize: 11, whiteSpace: "nowrap" }}>
-            <span style={{ color: "#6B7280" }}>1,976 total</span>
+            <span style={{ color: "#6B7280" }}>{govData.systemStats?.totalResources?.toLocaleString() ?? "1,976"} total</span>
             <span style={{ margin: "0 4px", color: "#D1D5DB" }}>·</span>
-            <span style={{ color: "#166534" }}>1,343 live</span>
+            <span style={{ color: "#166534" }}>{(govData.systemStats?.publishedResources ?? 1343).toLocaleString()} live</span>
             <span style={{ margin: "0 4px", color: "#D1D5DB" }}>·</span>
-            <span style={{ color: "#DC2626", fontWeight: 700 }}>633 offline (32%) ⚠</span>
+            <span style={{ color: "#DC2626", fontWeight: 700 }}>{(govData.systemStats?.unavailableResources ?? 633).toLocaleString()} offline ({govData.systemStats?.unavailableRate ?? 32}%) ⚠</span>
           </div>
         </div>
         <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
@@ -460,12 +624,7 @@ export default function GovernmentPanel() {
         )}
         {activeFilterCount > 0 && (
           <span style={{ fontSize: 11, color: "#6B7280", marginLeft: 2 }}>
-            {govData.underservedZips.filter((z) => {
-              if (filters.poverty === "high"   && z.poverty <  30) return false;
-              if (filters.poverty === "medium" && (z.poverty < 15 || z.poverty >= 30)) return false;
-              if (filters.poverty === "low"    && z.poverty >= 15) return false;
-              return true;
-            }).length} of {govData.underservedZips.length} ZIPs
+            {filteredZipCount} of {govData.underservedZips.length} ZIPs
           </span>
         )}
       </div>
@@ -501,10 +660,10 @@ export default function GovernmentPanel() {
 
       {/* ── Tab content (independently scrollable) ── */}
       <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px 8px" }}>
-        {activeTab === "overview"    && <OverviewTab />}
-        {activeTab === "underserved" && <UnderservedTab filters={filters} flyTo={flyTo} />}
-        {activeTab === "barriers"    && <AccessBarriersTab />}
-        {activeTab === "gaps"        && <ResourceGapsTab />}
+        {activeTab === "overview"    && <OverviewTab filters={filters} govData={govData} />}
+        {activeTab === "underserved" && <UnderservedTab filters={filters} flyTo={flyTo} govData={govData} />}
+        {activeTab === "barriers"    && <AccessBarriersTab govData={govData} />}
+        {activeTab === "gaps"        && <ResourceGapsTab govData={govData} />}
         {activeTab === "alice" && <ALICETab flyTo={flyTo} />}
         <div style={{ height: 12 }} />
         <Footer />
