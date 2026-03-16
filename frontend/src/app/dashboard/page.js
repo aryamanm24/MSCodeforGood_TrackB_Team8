@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import CensusLayerControls from "@/components/CensusLayerControls.jsx";
@@ -71,7 +71,7 @@ function getDefaultTabs(persona) {
 
 const VALID_PERSONAS = new Set(["pantry-operator", "donor", "government", "admin"]);
 
-export default function DashboardPage() {
+function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -485,5 +485,13 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center w-screen h-screen text-sm text-gray-400">Loading…</div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }
