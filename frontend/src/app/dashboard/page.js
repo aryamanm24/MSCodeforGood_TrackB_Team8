@@ -278,6 +278,8 @@ export default function DashboardPage() {
                 govData={govData ?? mockGovData}
                 resources={govResources ?? resources}
               />
+              {/* Census layer toggle hidden — census data not yet connected to real API */}
+              {false && (
               <div className="absolute top-4 right-4 z-[900] flex flex-col items-end gap-2">
                 <button
                   type="button"
@@ -301,6 +303,7 @@ export default function DashboardPage() {
                   </div>
                 )}
               </div>
+              )}
             </div>
           </div>
         );

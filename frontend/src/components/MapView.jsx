@@ -3,6 +3,9 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "leaflet.markercluster";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import { resources as defaultResources, censusTracts, donorPortfolio, govData as defaultGovData } from "@/lib/mockData";
 import { ratingColor, povertyOpacity } from "@/lib/helpers";
 import { CENSUS_LAYERS } from "@/lib/constants";
@@ -27,16 +30,21 @@ function normalizeResourceForMap(r) {
 const viewConfigs = {
   operator: { center: [40.708, -74.005], zoom: 16, resource: "res_002" },
   donor: { center: [40.714, -73.998], zoom: 14 },
-  // Center on Central Harlem cluster so all 5 underserved ZIPs are visible
-  government: { center: [40.8116, -73.9465], zoom: 12 },
+  // Open on the Bronx cluster where most underserved ZIPs are concentrated
+  government: { center: [40.838, -73.917], zoom: 13 },
 };
 
-// Camera position per government tab
+// Camera position per government tab — all centered on the Bronx/upper-Manhattan
+// underserved cluster so the map is useful immediately without panning
 const GOV_TAB_CAMERA = {
-  overview:    { center: [40.7128, -74.006],  zoom: 10 },
-  underserved: { center: [40.8116, -73.9465], zoom: 12 },
-  barriers:    { center: [40.8116, -73.9465], zoom: 11 },
-  gaps:        { center: [40.8116, -73.9465], zoom: 11 },
+  overview:    { center: [40.838, -73.917], zoom: 12 },
+  underserved: { center: [40.838, -73.917], zoom: 13 },
+  barriers:    { center: [40.838, -73.917], zoom: 12 },
+  gaps:        { center: [40.838, -73.917], zoom: 12 },
+  alice:       { center: [40.838, -73.917], zoom: 12 },
+  transit:     { center: [40.838, -73.917], zoom: 12 },
+  reliability: { center: [40.838, -73.917], zoom: 12 },
+  vulnerable:  { center: [40.838, -73.917], zoom: 12 },
 };
 
 // 3-tier poverty color: blue (low) -> orange (mid) -> red (high)
@@ -66,6 +74,7 @@ export default function MapView({
   const mapRef = useRef(null);
   const markersRef = useRef([]);
   const overlaysRef = useRef([]);
+  const zipLabelsRef = useRef([]);          // ZIP badge markers tracked separately so they can be toggled
   const censusOverlaysRef = useRef([]);
   const selectedZipOverlayRef = useRef(null);
 
@@ -86,11 +95,20 @@ export default function MapView({
   // Stable ref to the latest render function (avoids stale-closure issues)
   const renderGovRef = useRef(null);
 
+  // ZIP label visibility toggle (government mode only)
+  const [showZipLabels, setShowZipLabels] = useState(true);
+  // Legend collapse state
+  const [legendCollapsed, setLegendCollapsed] = useState(false);
+  const showZipLabelsRef = useRef(true);
+  showZipLabelsRef.current = showZipLabels;
+
   const clear = useCallback(() => {
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
     overlaysRef.current.forEach((o) => o.remove());
     overlaysRef.current = [];
+    zipLabelsRef.current.forEach((m) => m.remove());
+    zipLabelsRef.current = [];
   }, []);
 
   const clearCensus = useCallback(() => {
@@ -170,7 +188,7 @@ export default function MapView({
   }, [effectiveGovData, effectiveResources, clear]);
 
   function renderOperator(map, activeId) {
-    defaultResources.forEach((r) => {
+    effectiveResources.forEach((r) => {
       const isActive = r.id === activeId;
       const color = ratingColor(r.rating);
       const isSoup = r.type === "SOUP_KITCHEN";
@@ -204,7 +222,7 @@ export default function MapView({
       markersRef.current.push(marker);
     });
 
-    const active = defaultResources.find((r) => r.id === activeId);
+    const active = effectiveResources.find((r) => r.id === activeId);
     if (active) onResourceSelect(active);
   }
 
@@ -265,20 +283,20 @@ export default function MapView({
   function renderGovernmentForTab(map, tab) {
     const govData = govDataRef.current;
     const resourcesList = resourcesForMapRef.current;
+    // On underserved/gaps tabs the overlays are the focus — dim pins
     const dimMarkers = tab === "underserved" || tab === "gaps";
 
     // ── 1) Underserved ZIP polygons ──
     (govData?.underservedZips ?? []).forEach((z) => {
       const fillColor = z.needScore >= 70 ? "#EF4444" : "#F59E0B";
-      // Dim polygons when barriers tab is active (markers take focus there)
       const fillOpacity = tab === "barriers"
-        ? 0.10
-        : z.needScore >= 70 ? 0.28 : 0.22;
-      const strokeOpacity = tab === "barriers" ? 0.25 : 0.6;
+        ? 0.08
+        : z.needScore >= 70 ? 0.14 : 0.10;
+      const strokeOpacity = tab === "barriers" ? 0.20 : 0.75;
 
       const rect = L.rectangle(z.bounds, {
         color: fillColor,
-        weight: 1.5,
+        weight: 2,
         fillColor,
         fillOpacity,
         opacity: strokeOpacity,
@@ -298,32 +316,56 @@ export default function MapView({
       );
       overlaysRef.current.push(rect);
 
-      // ZIP label in polygon center
+      // ZIP label — two-row badge: coloured header with ZIP, white row with neighbourhood
       const center = [
         (z.bounds[0][0] + z.bounds[1][0]) / 2,
         (z.bounds[0][1] + z.bounds[1][1]) / 2,
       ];
       const labelIcon = L.divIcon({
         className: "",
+        // translateX(-50%) centres the variable-width badge on the polygon centre
         html: `<div style="
-          padding:2px 7px;
-          background:rgba(239,68,68,0.15);
-          border:1.5px solid ${fillColor};
-          border-radius:5px;
-          font-size:10px;
-          color:${fillColor};
-          font-weight:700;
-          font-family:DM Sans,sans-serif;
-          white-space:nowrap;
-          backdrop-filter:blur(2px);
-        ">${z.zip}</div>`,
-        iconSize: [48, 20],
-        iconAnchor: [24, 10],
+          transform: translateX(-50%);
+          display: inline-block;
+          background: white;
+          border-radius: 6px;
+          border: 1.5px solid ${fillColor};
+          box-shadow: 0 2px 8px rgba(0,0,0,0.22);
+          overflow: hidden;
+          pointer-events: none;
+          font-family: 'DM Sans', system-ui, sans-serif;
+          min-width: 68px;
+        ">
+          <div style="
+            background: ${fillColor};
+            color: white;
+            font-size: 12px;
+            font-weight: 800;
+            padding: 4px 10px;
+            letter-spacing: 0.05em;
+            text-align: center;
+          ">${z.zip}</div>
+          <div style="
+            color: #374151;
+            font-size: 9px;
+            font-weight: 500;
+            padding: 3px 8px;
+            text-align: center;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            line-height: 1.3;
+          ">${z.neighborhood || ""}</div>
+        </div>`,
+        iconAnchor: [0, 0],
       });
-      overlaysRef.current.push(L.marker(center, { icon: labelIcon }).addTo(map));
+      const labelMarker = L.marker(center, { icon: labelIcon, zIndexOffset: 1000 });
+      if (showZipLabelsRef.current) labelMarker.addTo(map);
+      zipLabelsRef.current.push(labelMarker);
     });
 
-    // ── 2) Zero-pantry ZIP outlines (shown on overview, underserved, gaps) ──
+    // ── 2) Zero-pantry ZIP outlines ──
     if (tab !== "barriers") {
       (govData?.zeroPantryZips ?? []).forEach((z) => {
         const rect = L.rectangle(z.bounds, {
@@ -331,7 +373,7 @@ export default function MapView({
           weight: 2,
           dashArray: "7, 5",
           fillOpacity: 0,
-          opacity: 0.8,
+          opacity: 0.75,
         }).addTo(map);
 
         rect.bindPopup(
@@ -353,28 +395,82 @@ export default function MapView({
         const labelIcon = L.divIcon({
           className: "",
           html: `<div style="
-            padding:2px 7px;
-            background:rgba(255,255,255,0.9);
-            border:1.5px dashed #DC2626;
-            border-radius:5px;
-            font-size:10px;
-            color:#DC2626;
-            font-weight:700;
-            font-family:DM Sans,sans-serif;
-            white-space:nowrap;
-          ">No pantries · ${z.zip}</div>`,
-          iconSize: [104, 20],
-          iconAnchor: [52, 10],
+            transform: translateX(-50%);
+            display: inline-block;
+            background: white;
+            border-radius: 6px;
+            border: 1.5px dashed #DC2626;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+            overflow: hidden;
+            pointer-events: none;
+            font-family: 'DM Sans', system-ui, sans-serif;
+            min-width: 68px;
+          ">
+            <div style="
+              background: #FEE2E2;
+              color: #991B1B;
+              font-size: 12px;
+              font-weight: 800;
+              padding: 4px 10px;
+              letter-spacing: 0.05em;
+              text-align: center;
+              border-bottom: 1px dashed #FECACA;
+            ">${z.zip}</div>
+            <div style="
+              color: #DC2626;
+              font-size: 9px;
+              font-weight: 600;
+              padding: 3px 8px;
+              text-align: center;
+              white-space: nowrap;
+              line-height: 1.3;
+            ">No pantries</div>
+          </div>`,
+          iconAnchor: [0, 0],
         });
-        overlaysRef.current.push(L.marker(center, { icon: labelIcon }).addTo(map));
+        const zeroPantryLabel = L.marker(center, { icon: labelIcon, zIndexOffset: 900 });
+        if (showZipLabelsRef.current) zeroPantryLabel.addTo(map);
+        zipLabelsRef.current.push(zeroPantryLabel);
       });
     }
 
-    // ── 3) Resource pins — color/opacity varies by tab ──
+    // ── 3) Resource pins — clustered for performance and readability ──
+    // Dimmed tabs (underserved, gaps) get transparent direct markers so the
+    // zone overlays take visual precedence.  All other tabs use a cluster group
+    // so hundreds of nearby pins collapse into a single readable badge.
+    const clusterGroup = dimMarkers ? null : L.markerClusterGroup({
+      maxClusterRadius: 48,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      animate: true,
+      disableClusteringAtZoom: 15,
+      iconCreateFunction: (cluster) => {
+        const count = cluster.getChildCount();
+        const size = count >= 50 ? 40 : count >= 10 ? 34 : 28;
+        const bg   = count >= 50 ? "#DC2626" : count >= 10 ? "#D97706" : "#2D6A4F";
+        return L.divIcon({
+          html: `<div style="
+            width:${size}px;height:${size}px;
+            background:${bg};
+            color:#fff;
+            border:2.5px solid #fff;
+            border-radius:50%;
+            display:flex;align-items:center;justify-content:center;
+            font-size:${count >= 100 ? 10 : 11}px;
+            font-weight:700;
+            font-family:'DM Sans',system-ui,sans-serif;
+            box-shadow:0 2px 8px rgba(0,0,0,0.30);
+          ">${count}</div>`,
+          className: "",
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size / 2],
+        });
+      },
+    });
+
     resourcesList.forEach((r) => {
       let color;
       if (tab === "barriers") {
-        // Color by access barrier type
         const tags = (r.tags ?? []).map((t) => String(t).toLowerCase());
         if (tags.some((t) => t.includes("id required")))       color = "#EF4444";
         else if (tags.some((t) => t.includes("registration"))) color = "#F59E0B";
@@ -384,36 +480,46 @@ export default function MapView({
       }
 
       const isSoup = r.type === "SOUP_KITCHEN";
-      const size = 15;
+      const size = 12;
 
       const icon = L.divIcon({
         className: "",
         html: `<div style="
           width:${size}px;height:${size}px;
           background:${color};
-          border:2.5px solid #fff;
+          border:2px solid #fff;
           border-radius:${isSoup ? "3px" : "50%"};
-          box-shadow:0 1px 5px rgba(0,0,0,0.28);
+          box-shadow:0 1px 4px rgba(0,0,0,0.30);
         "></div>`,
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
       });
 
-      const marker = L.marker([r.lat, r.lng], { icon }).addTo(map);
-      // Dim markers when underserved/gaps tab is active
-      if (dimMarkers) marker.setOpacity(0.25);
+      const popup = `<div style="font-family:DM Sans,sans-serif;font-size:12px;line-height:1.6">
+        <strong style="font-size:13px;">${r.name}</strong><br/>
+        ${r.rating ? `<span style="color:${color};font-weight:600;">★ ${r.rating}</span> &middot; ` : ""}
+        ${r.reviews ? `${r.reviews} reviews` : "No reviews yet"}
+        <br/><span style="color:#9c9588;font-size:11px;">${isSoup ? "Soup kitchen" : "Food pantry"}</span>
+      </div>`;
 
-      marker.bindPopup(
-        `<div style="font-family:DM Sans,sans-serif;font-size:12px;line-height:1.6">
-          <strong style="font-size:13px;">${r.name}</strong><br/>
-          ${r.rating ? `<span style="color:${color};font-weight:600;">★ ${r.rating}</span> &middot; ` : ""}
-          ${r.reviews ? `${r.reviews} reviews` : "No reviews yet"}
-          <br/><span style="color:#9c9588;font-size:11px;">${isSoup ? "Soup kitchen" : "Food pantry"}</span>
-        </div>`,
-        { closeButton: false },
-      );
-      markersRef.current.push(marker);
+      if (dimMarkers) {
+        // Place directly on map at low opacity — don't cluster
+        const marker = L.marker([r.lat, r.lng], { icon }).addTo(map);
+        marker.setOpacity(0.20);
+        marker.bindPopup(popup, { closeButton: false });
+        markersRef.current.push(marker);
+      } else {
+        const marker = L.marker([r.lat, r.lng], { icon });
+        marker.bindPopup(popup, { closeButton: false });
+        clusterGroup.addLayer(marker);
+      }
     });
+
+    if (clusterGroup) {
+      clusterGroup.addTo(map);
+      // Track in overlaysRef so clear() removes it cleanly
+      overlaysRef.current.push(clusterGroup);
+    }
   }
 
   // Keep renderGovRef current so the event listener always calls the latest version
@@ -510,6 +616,20 @@ export default function MapView({
     };
   }, [mode, clear]);
 
+  // Show / hide ZIP badge labels whenever the toggle changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || mode !== "government") return;
+    zipLabelsRef.current.forEach((m) => {
+      if (showZipLabels) {
+        m.addTo(map);
+      } else {
+        m.remove();
+      }
+    });
+  }, [showZipLabels, mode]);
+
+  /* DISABLED: census overlay uses mock data — restore when real census API is available
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -543,6 +663,7 @@ export default function MapView({
       censusOverlaysRef.current.push(rect);
     });
   }, [mode, censusLayer, clearCensus]);
+  */
 
   const activeLegend =
     mode === "government" && censusLayer
@@ -564,95 +685,168 @@ export default function MapView({
         style={{ background: "#f0ede7" }}
       />
 
-      {/* Default legend when no census layer is selected — always bottom-left */}
+      {/* ZIP label toggle — only visible in government mode */}
+      {mode === "government" && (
+        <button
+          onClick={() => setShowZipLabels((v) => !v)}
+          title={showZipLabels ? "Hide ZIP labels" : "Show ZIP labels"}
+          style={{
+            position: "absolute",
+            top: 16,
+            left: 16,
+            zIndex: 900,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 12px",
+            background: showZipLabels ? "#2D6A4F" : "rgba(255,255,255,0.96)",
+            color: showZipLabels ? "#fff" : "#374151",
+            border: `1.5px solid ${showZipLabels ? "#2D6A4F" : "#D1D5DB"}`,
+            borderRadius: 8,
+            fontSize: 11,
+            fontWeight: 600,
+            fontFamily: "'DM Sans', system-ui, sans-serif",
+            cursor: "pointer",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            transition: "background 0.15s, color 0.15s, border-color 0.15s",
+            userSelect: "none",
+          }}
+        >
+          {/* Tag / label icon */}
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" style={{ width: 14, height: 14, flexShrink: 0 }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
+          </svg>
+          {showZipLabels ? "Hide ZIP labels" : "Show ZIP labels"}
+        </button>
+      )}
+
+      {/* Default legend when no census layer is selected — bottom-right, collapsible */}
       {mode === "government" && !activeLegend && (
         <div
-          className="absolute bottom-5 left-4 z-[800] bg-white rounded-xl p-3.5 border border-sand-200"
-          style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.1)" }}
+          style={{
+            position: "absolute",
+            bottom: 24,
+            right: 12,
+            zIndex: 1000,
+            background: "rgba(255, 255, 255, 0.97)",
+            borderRadius: 10,
+            padding: legendCollapsed ? "9px 14px" : "12px 14px",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.06)",
+            fontSize: 11,
+            fontFamily: "'DM Sans', system-ui, sans-serif",
+            minWidth: legendCollapsed ? 0 : 160,
+            maxWidth: 200,
+            backdropFilter: "blur(4px)",
+            transition: "padding 0.2s",
+          }}
         >
-          {activeGovTab === "barriers" ? (
-            /* ── Barriers tab: colored by access barrier type ── */
-            <>
-              <div className="text-[9px] font-semibold text-sand-400 uppercase tracking-widest mb-2">
-                Colored by access barrier
-              </div>
-              <div className="space-y-1.5">
-                {[
-                  { label: "ID required",        color: "#EF4444", round: true },
-                  { label: "Registration req.",  color: "#F59E0B", round: true },
-                  { label: "No major barrier",   color: "#1D9E75", round: true },
-                ].map(({ label, color, round }) => (
-                  <div key={label} className="flex items-center gap-2">
-                    <div className="w-4 h-4 shrink-0 border-2 border-white"
-                      style={{ backgroundColor: color, borderRadius: round ? "50%" : "3px", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
-                    <span className="text-[10px] text-sand-600">{label}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : activeGovTab === "gaps" ? (
-            /* ── Gaps tab: colored by resource type ── */
-            <>
-              <div className="text-[9px] font-semibold text-sand-400 uppercase tracking-widest mb-2">
-                Resource type
-              </div>
-              <div className="space-y-1.5">
-                {[
-                  { label: "Food pantry",       color: "#1D9E75", round: true },
-                  { label: "Community fridge",  color: "#3B82F6", round: true },
-                  { label: "Soup kitchen",      color: "#1D9E75", round: false },
-                ].map(({ label, color, round }) => (
-                  <div key={label} className="flex items-center gap-2">
-                    <div className="w-4 h-4 shrink-0 border-2 border-white"
-                      style={{ backgroundColor: color, borderRadius: round ? "50%" : "3px", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
-                    <span className="text-[10px] text-sand-600">{label}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="pt-2 mt-2 border-t border-sand-100 space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-3 rounded-sm shrink-0" style={{ background: "#EF4444", opacity: 0.35 }} />
-                  <span className="text-[10px] text-sand-600">Underserved ZIP</span>
-                </div>
-              </div>
-            </>
-          ) : (
-            /* ── Overview / Underserved tabs: poverty rate + resource markers ── */
-            <>
-              <div className="text-[9px] font-semibold text-sand-400 uppercase tracking-widest mb-2">
-                Resources (by rating)
-              </div>
-              <div className="space-y-1.5">
-                {governmentResourceLegend.map(({ label, color, round }) => (
-                  <div key={label} className="flex items-center gap-2">
-                    <div
-                      className="w-4 h-4 shrink-0 border-2 border-white"
-                      style={{
-                        backgroundColor: color,
-                        borderRadius: round ? "50%" : "3px",
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                      }}
-                    />
-                    <span className="text-[10px] text-sand-600">{label}</span>
-                  </div>
-                ))}
-              </div>
+          {/* ── Collapse toggle header ── */}
+          <button
+            onClick={() => setLegendCollapsed((v) => !v)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              width: "100%",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+              marginBottom: legendCollapsed ? 0 : 8,
+              gap: 20,
+            }}
+          >
+            <span style={{
+              fontSize: 9,
+              fontWeight: 700,
+              color: "#6B7280",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              whiteSpace: "nowrap",
+            }}>
+              Legend
+            </span>
+            {/* Chevron — points up when expanded, down when collapsed */}
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="#9CA3AF"
+              style={{ width: 12, height: 12, flexShrink: 0, transform: legendCollapsed ? "rotate(0deg)" : "rotate(180deg)", transition: "transform 0.2s" }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
 
-              <div className="pt-2 mt-2 border-t border-sand-100 space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-3 rounded-sm shrink-0" style={{ background: "#EF4444", opacity: 0.4 }} />
-                  <span className="text-[10px] text-sand-600">Underserved ZIP (need ≥70)</span>
+          {/* ── Legend body — hidden when collapsed ── */}
+          {!legendCollapsed && (
+            activeGovTab === "barriers" ? (
+              <>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #F3F4F6" }}>
+                  Colored by access barrier
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-3 rounded-sm shrink-0" style={{ background: "#F59E0B", opacity: 0.35 }} />
-                  <span className="text-[10px] text-sand-600">Underserved ZIP (need 50–69)</span>
+                <div>
+                  {[
+                    { label: "ID required",        color: "#EF4444", round: true },
+                    { label: "Registration req.",  color: "#F59E0B", round: true },
+                    { label: "No major barrier",   color: "#1D9E75", round: true },
+                  ].map(({ label, color, round }) => (
+                    <div key={label} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                      <div style={{ width: 16, height: 16, backgroundColor: color, borderRadius: round ? "50%" : "3px", boxShadow: "0 1px 3px rgba(0,0,0,0.2)", flexShrink: 0, border: "2px solid white" }} />
+                      <span>{label}</span>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-3 rounded-sm shrink-0 border-2 border-dashed" style={{ borderColor: "#DC2626" }} />
-                  <span className="text-[10px] text-sand-600">Zero-pantry zone</span>
+              </>
+            ) : activeGovTab === "gaps" ? (
+              <>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #F3F4F6" }}>
+                  Resource type
                 </div>
-              </div>
-            </>
+                <div>
+                  {[
+                    { label: "Food pantry",       color: "#1D9E75", round: true },
+                    { label: "Community fridge",  color: "#3B82F6", round: true },
+                    { label: "Soup kitchen",      color: "#1D9E75", round: false },
+                  ].map(({ label, color, round }) => (
+                    <div key={label} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                      <div style={{ width: 16, height: 16, backgroundColor: color, borderRadius: round ? "50%" : "3px", boxShadow: "0 1px 3px rgba(0,0,0,0.2)", flexShrink: 0, border: "2px solid white" }} />
+                      <span>{label}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ height: 1, background: "#F3F4F6", margin: "7px 0" }} />
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 5 }}>Coverage zones</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                  <div style={{ width: 20, height: 12, borderRadius: 2, background: "#EF4444", opacity: 0.35, flexShrink: 0 }} />
+                  <span>Underserved ZIP</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #F3F4F6" }}>
+                  Resources (by rating)
+                </div>
+                <div>
+                  {governmentResourceLegend.map(({ label, color, round }) => (
+                    <div key={label} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                      <div style={{ width: 16, height: 16, backgroundColor: color, borderRadius: round ? "50%" : "3px", boxShadow: "0 1px 3px rgba(0,0,0,0.2)", flexShrink: 0, border: "2px solid white" }} />
+                      <span>{label}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ height: 1, background: "#F3F4F6", margin: "7px 0" }} />
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 5 }}>Coverage zones</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                  <div style={{ width: 20, height: 12, borderRadius: 2, background: "#EF4444", opacity: 0.4, flexShrink: 0 }} />
+                  <span>Underserved ZIP (need ≥70)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                  <div style={{ width: 20, height: 12, borderRadius: 2, background: "#F59E0B", opacity: 0.35, flexShrink: 0 }} />
+                  <span>Underserved ZIP (need 50–69)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                  <div style={{ width: 20, height: 12, borderRadius: 2, border: "2px dashed #DC2626", flexShrink: 0 }} />
+                  <span>Zero-pantry zone</span>
+                </div>
+              </>
+            )
           )}
         </div>
       )}
@@ -660,57 +854,75 @@ export default function MapView({
       {/* Dynamic legend for selected census layer */}
       {activeLegend && (
         <div
-          className="absolute bottom-5 left-4 z-[800] bg-white rounded-xl p-3.5 border border-sand-200"
-          style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.1)" }}
+          style={{
+            position: "absolute",
+            bottom: 24,
+            right: 12,
+            zIndex: 1000,
+            background: "rgba(255, 255, 255, 0.97)",
+            borderRadius: 10,
+            padding: legendCollapsed ? "9px 14px" : "12px 14px",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.06)",
+            fontSize: 11,
+            fontFamily: "'DM Sans', system-ui, sans-serif",
+            minWidth: legendCollapsed ? 0 : 160,
+            maxWidth: 200,
+            backdropFilter: "blur(4px)",
+            transition: "padding 0.2s",
+          }}
         >
-          <div className="text-[9px] font-semibold text-sand-400 uppercase tracking-widest mb-2">
-            {CENSUS_LAYERS[censusLayer].label}
-          </div>
-          <div className="space-y-1.5">
-            {activeLegend.map(({ label, color, opacity }) => (
-              <div key={label} className="flex items-center gap-2">
-                <div
-                  className="w-5 h-3 rounded-sm shrink-0"
-                  style={{ backgroundColor: color, opacity }}
-                />
-                <span className="text-[10px] text-sand-500">{label}</span>
+          <button
+            onClick={() => setLegendCollapsed((v) => !v)}
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", cursor: "pointer", padding: 0, marginBottom: legendCollapsed ? 0 : 8, gap: 20 }}
+          >
+            <span style={{ fontSize: 9, fontWeight: 700, color: "#6B7280", letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+              Legend
+            </span>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="#9CA3AF"
+              style={{ width: 12, height: 12, flexShrink: 0, transform: legendCollapsed ? "rotate(0deg)" : "rotate(180deg)", transition: "transform 0.2s" }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+          {!legendCollapsed && (
+            <>
+              <div>
+                {activeLegend.map(({ label, color, opacity }) => (
+                  <div key={label} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                    <div style={{ width: 20, height: 12, borderRadius: 2, backgroundColor: color, opacity, flexShrink: 0 }} />
+                    <span>{label}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-
-          <div className="text-[9px] font-semibold text-sand-400 uppercase tracking-widest mt-3 mb-2">
-            Resources
-          </div>
-          <div className="space-y-1.5">
-            {governmentResourceLegend.map(({ label, color, round }) => (
-              <div key={label} className="flex items-center gap-2">
-                <div
-                  className="w-4 h-4 shrink-0 border-2 border-white"
-                  style={{
-                    backgroundColor: color,
-                    borderRadius: round ? "50%" : "3px",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                  }}
-                />
-                <span className="text-[10px] text-sand-600">{label}</span>
+              <div style={{ height: 1, background: "#F3F4F6", margin: "7px 0" }} />
+              <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 5 }}>
+                Resources
               </div>
-            ))}
-          </div>
-
-          <div className="pt-2 mt-2 border-t border-sand-100 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <div className="w-5 h-3 rounded-sm shrink-0" style={{ background: "#EF4444", opacity: 0.4 }} />
-              <span className="text-[10px] text-sand-600">Underserved ZIP (need ≥70)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-5 h-3 rounded-sm shrink-0" style={{ background: "#F59E0B", opacity: 0.35 }} />
-              <span className="text-[10px] text-sand-600">Underserved ZIP (need 50–69)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-5 h-3 rounded-sm shrink-0 border-2 border-dashed" style={{ borderColor: "#DC2626" }} />
-              <span className="text-[10px] text-sand-600">Zero-pantry zone</span>
-            </div>
-          </div>
+              <div>
+                {governmentResourceLegend.map(({ label, color, round }) => (
+                  <div key={label} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                    <div style={{ width: 16, height: 16, backgroundColor: color, borderRadius: round ? "50%" : "3px", boxShadow: "0 1px 3px rgba(0,0,0,0.2)", flexShrink: 0, border: "2px solid white" }} />
+                    <span>{label}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ height: 1, background: "#F3F4F6", margin: "7px 0" }} />
+              <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 5 }}>
+                Coverage zones
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                <div style={{ width: 20, height: 12, borderRadius: 2, background: "#EF4444", opacity: 0.25, flexShrink: 0 }} />
+                <span>Underserved ZIP (need ≥70)</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                <div style={{ width: 20, height: 12, borderRadius: 2, background: "#F59E0B", opacity: 0.20, flexShrink: 0 }} />
+                <span>Underserved ZIP (need 50–69)</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, fontSize: 11, color: "#374151" }}>
+                <div style={{ width: 20, height: 12, borderRadius: 2, border: "2px dashed #DC2626", flexShrink: 0 }} />
+                <span>Zero-pantry zone</span>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -174,7 +174,7 @@ async function getGovData(req, res) {
         return pop > 0 && (poverty >= 18 || (pantryCount > 0 && needScore(z) >= 45));
       })
       .sort((a, b) => needScore(b) - needScore(a))
-      .slice(0, 10);
+      .slice(0, 30);
 
     const underservedZips = underservedFromZips.map((z) => {
       const geo = getZipGeo(z.zip_code);

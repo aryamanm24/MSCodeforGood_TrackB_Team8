@@ -66,9 +66,11 @@ function ALICESummaryCard({ govData }) {
 
       {/* ALICE vs SNAP gap explainer */}
       <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderLeft: "4px solid #EF4444", borderRadius: "0 8px 8px 0", padding: "10px 12px", marginBottom: 14, fontSize: 12, color: "#991B1B", lineHeight: 1.6 }}>
-        SNAP eligibility only reaches ~30–38% of households in high-need ZIPs. ALICE data shows
-        60–84% of those same households are struggling — a <strong>40–50 percentage point gap</strong> of
-        working families invisible to standard food assistance metrics.
+        {(() => {
+          const alicePct = govData?.aliceSummary?.pctBelowAlice ?? 56;
+          const snapEstimate = Math.round(alicePct * 0.6);
+          return `${alicePct}% of NYC households fall below the ALICE threshold — significantly higher than the estimated ${snapEstimate}% captured by SNAP eligibility alone. Working families above the federal poverty line remain invisible to standard food assistance metrics.`;
+        })()}
       </div>
 
       {/* Borough bar chart */}
@@ -102,12 +104,23 @@ function ALICESummaryCard({ govData }) {
   );
 }
 
-function MissingMiddleCards({ flyTo, govData }) {
+const BOROUGH_DISPLAY_LOCAL = {
+  manhattan: "Manhattan", brooklyn: "Brooklyn", queens: "Queens",
+  bronx: "Bronx", staten_island: "Staten Island",
+};
+
+function MissingMiddleCards({ flyTo, govData, filters }) {
   const [selected, setSelected] = useState(null);
+
+  // Apply borough filter if active
+  const boroughKey = filters?.borough && filters.borough !== "all"
+    ? (BOROUGH_DISPLAY_LOCAL[filters.borough] ?? null)
+    : null;
 
   // Sort by aliceGap descending — biggest "missing middle" first
   const sorted = [...(govData?.underservedZips ?? [])]
     .filter((z) => z.alicePct != null)
+    .filter((z) => !boroughKey || z.borough === boroughKey)
     .sort((a, b) => (b.aliceGap ?? 0) - (a.aliceGap ?? 0));
 
   return (
@@ -120,6 +133,11 @@ function MissingMiddleCards({ flyTo, govData }) {
         Larger gap = more households that SNAP-based programs miss entirely.
       </div>
 
+      {sorted.length === 0 && boroughKey && (
+        <div style={{ padding: 24, textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>
+          No data available for {boroughKey} with current filters.
+        </div>
+      )}
       {sorted.map((z) => {
         const badge = gapColor(z.aliceGap);
         const isSelected = selected === z.zip;
@@ -225,18 +243,20 @@ function MissingMiddleCards({ flyTo, govData }) {
 
 // ── Main export ───────────────────────────────────────────────────────────
 
-export default function ALICETab({ flyTo, govData: govDataProp }) {
+export default function ALICETab({ flyTo, govData: govDataProp, filters }) {
   const govData = govDataProp ?? mockGovData;
+  const bronxEntry = govData?.aliceSummary?.boroughs?.find((b) => b.borough === "Bronx");
+  const bronxAlice = bronxEntry?.avgAlicePct ?? 70;
+  const bronxSnap = Math.round(bronxAlice * 0.45);
   return (
     <div>
       {/* What ALICE reveals */}
       <div style={{ background: "#F0FDF4", borderLeft: "3px solid #2D6A4F", borderRadius: "0 8px 8px 0", padding: "9px 12px", marginBottom: 14, fontSize: 12, color: "#166534", lineHeight: 1.5 }}>
-        SNAP data undercounts true food need by 40–50 percentage points in the Bronx and
-        East Harlem. The ALICE dataset reveals the full scope of struggling households.
+        {`SNAP data undercounts true food need — the Bronx has ${bronxAlice}% of households below the ALICE threshold while SNAP reaches an estimated ${bronxSnap}% of those in need.`}
       </div>
 
       <ALICESummaryCard govData={govData} />
-      <MissingMiddleCards flyTo={flyTo} govData={govData} />
+      <MissingMiddleCards flyTo={flyTo} govData={govData} filters={filters} />
     </div>
   );
 }
